@@ -19,7 +19,7 @@ interface ChapterData {
 interface StoryData {
   chapters: ChapterData;
   lastModified: number;
-  tags: string[];
+  tags?: string[];
 }
 interface Library {
   [storyName: string]: StoryData;
@@ -523,7 +523,7 @@ const App: React.FC = () => {
 
         } catch (err) {
             console.error(err);
-            const errorMessage = 'Lỗi dịch chương này. Quá trình đã dừng lại.';
+            const errorMessage = err instanceof Error ? err.message : 'Lỗi dịch chương này. Quá trình đã dừng lại.';
             updatePanelState(panel.id, { error: errorMessage, isLoading: false });
             setIsBatchProcessing(false);
             setBatchProgress(null);
@@ -590,7 +590,10 @@ const App: React.FC = () => {
   const filteredLibraryKeys = useMemo(() => {
     const keys = Object.keys(library);
     const filtered = activeTagFilter
-      ? keys.filter(key => (library[key] as StoryData).tags?.includes(activeTagFilter))
+      ? keys.filter(key => {
+          const storyData = library[key] as StoryData;
+          return storyData?.tags?.includes(activeTagFilter);
+        })
       : keys;
     return filtered.sort((a, b) => library[b].lastModified - library[a].lastModified);
   }, [library, activeTagFilter]);

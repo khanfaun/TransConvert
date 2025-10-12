@@ -5,7 +5,7 @@ interface ChapterData {
 interface StoryData {
     chapters: ChapterData;
     lastModified: number;
-    tags: string[];
+    tags?: string[];
 }
 interface Library {
     [storyName: string]: StoryData;
