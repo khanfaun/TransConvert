@@ -1,3 +1,4 @@
+
 // Định nghĩa kiểu dữ liệu cho thư viện
 interface ChapterData {
     [chapter: string]: string;
@@ -32,11 +33,17 @@ export const loadLibrary = (): Library => {
         if (serializedLibrary === null) {
             return {};
         }
-        // Ensure old data has a tags property
         const library = JSON.parse(serializedLibrary);
+        // Data migration for older versions to prevent crashes
         for (const story in library) {
-            if (!library[story].tags) {
-                library[story].tags = [];
+            if (Object.prototype.hasOwnProperty.call(library, story)) {
+                const storyData = library[story];
+                if (!storyData.tags) {
+                    storyData.tags = [];
+                }
+                if (!storyData.chapters) {
+                    storyData.chapters = {};
+                }
             }
         }
         return library;

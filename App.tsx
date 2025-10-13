@@ -1,6 +1,7 @@
+
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { refineVietnameseText } from './services/geminiService';
-import { SpinnerIcon, CopyIcon, CheckIcon, CloseIcon, BookOpenIcon, ChevronDownIcon, PlusIcon, TagIcon, SettingsIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowLeftIcon } from './components/Icons';
+import { SpinnerIcon, CopyIcon, CheckIcon, CloseIcon, BookOpenIcon, ChevronDownIcon, PlusIcon, TagIcon, SettingsIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowLeftIcon, TrashIcon } from './components/Icons';
 import { loadLibrary, saveLibrary, loadLastStoryName, saveLastStoryName, loadSettings, saveSettings, AppSettings } from './services/storageService';
 
 // ---- INTERFACES ---- //
@@ -118,7 +119,6 @@ const TranslationPanel: React.FC<{
         />
       </div>
 
-      {isLoading && <SpinnerIcon className="animate-spin h-6 w-6 text-[var(--color-accent-primary)] absolute bottom-6 left-1/2 -translate-x-1/2" />}
       {error && <p className="text-red-600 text-center bg-red-100 p-3 rounded-lg">{error}</p>}
     </div>
   );
@@ -234,10 +234,14 @@ const ReaderPage: React.FC<{
   const chapterListRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  const chapterText = library[storyName]?.chapters[chapterNumber] || "Không tìm thấy nội dung chương.";
+  const chapterText = library[storyName]?.chapters?.[chapterNumber] || "Không tìm thấy nội dung chương.";
 
   const { chapterList, prevChapter, nextChapter } = useMemo(() => {
-    const chapters = Object.keys(library[storyName].chapters).sort((a, b) => parseFloat(a) - parseFloat(b));
+    const storyData = library[storyName];
+    if (!storyData) {
+      return { chapterList: [], prevChapter: null, nextChapter: null };
+    }
+    const chapters = Object.keys(storyData.chapters).sort((a, b) => parseFloat(a) - parseFloat(b));
     const currentIndex = chapters.indexOf(chapterNumber);
     const prev = currentIndex > 0 ? chapters[currentIndex - 1] : null;
     const next = currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
@@ -565,6 +569,25 @@ const App: React.FC = () => {
     setActiveStory(activeStory === story ? null : story);
   };
 
+  const deleteStory = (storyName: string) => {
+    const newLibrary = { ...library };
+    delete newLibrary[storyName];
+    setLibrary(newLibrary);
+    saveLibrary(newLibrary);
+    if (activeStory === storyName) {
+        setActiveStory(null);
+    }
+  };
+
+  const deleteChapter = (storyName: string, chapterNumber: string) => {
+      const newLibrary = JSON.parse(JSON.stringify(library)); // Deep copy
+      if (newLibrary[storyName] && newLibrary[storyName].chapters) {
+          delete newLibrary[storyName].chapters[chapterNumber];
+          setLibrary(newLibrary);
+          saveLibrary(newLibrary);
+      }
+  };
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -581,7 +604,8 @@ const App: React.FC = () => {
 
   const allTags = useMemo(() => {
     const tagsSet = new Set<string>();
-    Object.values(library).forEach(story => {
+    // FIX: Explicitly type `story` as `StoryData` because Object.values can return an array of `unknown` for indexed types.
+    Object.values(library).forEach((story: StoryData) => {
         story.tags?.forEach(tag => tagsSet.add(tag));
     });
     return Array.from(tagsSet).sort();
@@ -591,11 +615,14 @@ const App: React.FC = () => {
     const keys = Object.keys(library);
     const filtered = activeTagFilter
       ? keys.filter(key => {
+          // FIX: Cast library[key] to StoryData to inform TypeScript of its type,
+          // as indexing an object with a string key can result in an 'unknown' type.
           const storyData = library[key] as StoryData;
           return storyData?.tags?.includes(activeTagFilter);
         })
       : keys;
-    return filtered.sort((a, b) => library[b].lastModified - library[a].lastModified);
+    // FIX: Also cast here for sorting to access lastModified property safely.
+    return filtered.sort((a, b) => (library[b] as StoryData).lastModified - (library[a] as StoryData).lastModified);
   }, [library, activeTagFilter]);
 
   const isBatchButtonDisabled = isBatchProcessing || panels.some(p => !p.storyName.trim() || !p.chapterNumber.trim() || !p.inputText.trim());
@@ -682,24 +709,42 @@ const App: React.FC = () => {
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-2 border-t border-[var(--color-border-secondary)] pt-4">
                   {filteredLibraryKeys.map(story => (
                     <div key={story} className="rounded-lg border border-[var(--color-border-primary)]">
-                      <button onClick={() => toggleStory(story)} className="w-full flex justify-between items-center p-3 text-left hover:bg-[var(--color-bg-hover)]">
-                        <div>
-                          <span className="font-semibold text-[var(--color-text-primary)]">{story}</span>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                              {library[story].tags?.map(tag => (
-                                  <span key={tag} className="text-xs bg-[var(--color-accent-subtle-bg)] text-[var(--color-accent-subtle-text)] px-2 py-0.5 rounded-full">{tag}</span>
-                              ))}
-                          </div>
+                        <div className="flex justify-between items-center p-3">
+                            <button onClick={() => toggleStory(story)} className="flex-grow flex justify-between items-center text-left rounded-md -ml-2 p-2 hover:bg-[var(--color-bg-hover)] transition-colors">
+                                <div>
+                                    <span className="font-semibold text-[var(--color-text-primary)]">{story}</span>
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                        {library[story].tags?.map(tag => (
+                                            <span key={tag} className="text-xs bg-[var(--color-accent-subtle-bg)] text-[var(--color-accent-subtle-text)] px-2 py-0.5 rounded-full">{tag}</span>
+                                        ))}
+                                    </div>
+                                </div>
+                                <ChevronDownIcon className={`w-5 h-5 transition-transform flex-shrink-0 ml-2 text-[var(--color-text-secondary)] ${activeStory === story ? 'rotate-180' : ''}`}/>
+                            </button>
+                            <button 
+                                onClick={() => deleteStory(story)} 
+                                className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors ml-2 flex-shrink-0" 
+                                aria-label={`Xoá truyện ${story}`}>
+                                <TrashIcon className="w-5 h-5 text-[var(--color-text-muted)] hover:text-red-500" />
+                            </button>
                         </div>
-                        <ChevronDownIcon className={`w-5 h-5 transition-transform flex-shrink-0 ml-2 text-[var(--color-text-secondary)] ${activeStory === story ? 'rotate-180' : ''}`}/>
-                      </button>
                       {activeStory === story && (
                         <div className="p-3 border-t border-[var(--color-border-secondary)] bg-[var(--color-bg-hover)]">
-                            {Object.keys(library[story].chapters).sort((a, b) => parseFloat(a) - parseFloat(b)).map(chapter => (
-                              <button key={chapter} onClick={() => openReader(story, chapter)} className="block w-full text-left p-2 rounded hover:bg-[var(--color-accent-subtle-bg)] text-[var(--color-text-secondary)]">
-                                  Chương {chapter}
-                              </button>
-                            ))}
+                            <div className="space-y-1">
+                                {library[story].chapters && Object.keys(library[story].chapters).sort((a, b) => parseFloat(a) - parseFloat(b)).map(chapter => (
+                                  <div key={chapter} className="flex justify-between items-center group rounded-md hover:bg-[var(--color-bg-active)]">
+                                    <button onClick={() => openReader(story, chapter)} className="flex-grow text-left p-2 text-[var(--color-text-secondary)]">
+                                        Chương {chapter}
+                                    </button>
+                                    <button 
+                                      onClick={() => deleteChapter(story, chapter)} 
+                                      className="p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" 
+                                      aria-label={`Xoá chương ${chapter}`}>
+                                      <TrashIcon className="w-4 h-4 text-[var(--color-text-muted)]" />
+                                    </button>
+                                  </div>
+                                ))}
+                            </div>
                         </div>
                       )}
                     </div>

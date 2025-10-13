@@ -582,7 +582,8 @@ const App: React.FC = () => {
 
   const allTags = useMemo(() => {
     const tagsSet = new Set<string>();
-    Object.values(library).forEach(story => {
+    // FIX: Explicitly type `story` as `StoryData` because Object.values can return an array of `unknown` for indexed types.
+    Object.values(library).forEach((story: StoryData) => {
         story.tags?.forEach(tag => tagsSet.add(tag));
     });
     return Array.from(tagsSet).sort();
@@ -597,7 +598,8 @@ const App: React.FC = () => {
           return storyData?.tags?.includes(activeTagFilter);
         })
       : keys;
-    return filtered.sort((a, b) => library[b].lastModified - library[a].lastModified);
+    // FIX: Also cast here for sorting to access lastModified property safely.
+    return filtered.sort((a, b) => (library[b] as StoryData).lastModified - (library[a] as StoryData).lastModified);
   }, [library, activeTagFilter]);
 
   const isBatchButtonDisabled = isBatchProcessing || panels.some(p => !p.storyName.trim() || !p.chapterNumber.trim() || !p.inputText.trim());
