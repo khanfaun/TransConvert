@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 
 // State variables
@@ -12,23 +11,28 @@ let initializationPromise: Promise<void> | null = null;
  */
 const initializeApiKeys = async (): Promise<void> => {
   try {
-    // Avoid re-initialization
-    if (initializationPromise) return initializationPromise;
-
     let keysFromServer: string[] | undefined;
 
     // Environment 1: Vite build (e.g., Netlify)
-    // Vite defines `process.env` for us.
-    // @ts-ignore - This is a Vite-specific define, not a standard Node.js process.env
-    if (typeof process !== 'undefined' && process.env.API_KEYS) {
-      // @ts-ignore
-      const viteKeys = process.env.API_KEYS as unknown;
-      if (Array.isArray(viteKeys)) {
-        keysFromServer = viteKeys;
-      }
+    // Check for the custom global variable defined by vite.config.js.
+    // @ts-ignore - __VITE_API_KEYS__ is a custom global defined at build time.
+    if (typeof __VITE_API_KEYS__ !== 'undefined') {
+        // @ts-ignore
+        const viteKeyString = __VITE_API_KEYS__;
+        // The variable is injected as a string, so we need to parse it.
+        if (typeof viteKeyString === 'string') {
+            try {
+                const parsedKeys = JSON.parse(viteKeyString);
+                if (Array.isArray(parsedKeys)) {
+                    keysFromServer = parsedKeys;
+                }
+            } catch (e) {
+                console.error("Lỗi khi phân tích API keys từ môi trường build:", e);
+            }
+        }
     } 
     // Environment 2: Google AI Studio or similar web-based editor
-    // Check for a global object provided by the environment.
+    // If the Vite variable isn't there, check for the AI Studio environment.
     else {
       // @ts-ignore - 'google' is a global in the AI Studio environment
       if (typeof google !== 'undefined' && google.aistudio?.user?.getAPIKey) {

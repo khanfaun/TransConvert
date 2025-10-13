@@ -4,9 +4,10 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   define: {
-    // Gom tất cả các biến VITE_API_KEY_* từ môi trường (Netlify hoặc file .env)
-    // vào một mảng để ứng dụng có thể sử dụng và xoay vòng.
-    'process.env.API_KEYS': JSON.stringify([
+    // Định nghĩa một biến global __VITE_API_KEYS__ thay vì dùng process.env
+    // để tránh lỗi khi 'process' không tồn tại trong môi trường trình duyệt.
+    // Vite sẽ thay thế biến này bằng một chuỗi JSON chứa các API key.
+    '__VITE_API_KEYS__': JSON.stringify([
       process.env.VITE_API_KEY_1,
       process.env.VITE_API_KEY_2,
       process.env.VITE_API_KEY_3,
