@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "@google/genai";
 
 // State variables
@@ -14,22 +15,12 @@ const initializeApiKeys = async (): Promise<void> => {
     let keysFromServer: string[] | undefined;
 
     // Environment 1: Vite build (e.g., Netlify)
-    // Check for the custom global variable defined by vite.config.js.
+    // Vite's 'define' feature replaces __VITE_API_KEYS__ with an actual array literal
+    // in the build output, not a string. So, we must check if it's an array.
     // @ts-ignore - __VITE_API_KEYS__ is a custom global defined at build time.
-    if (typeof __VITE_API_KEYS__ !== 'undefined') {
+    if (typeof __VITE_API_KEYS__ !== 'undefined' && Array.isArray(__VITE_API_KEYS__)) {
         // @ts-ignore
-        const viteKeyString = __VITE_API_KEYS__;
-        // The variable is injected as a string, so we need to parse it.
-        if (typeof viteKeyString === 'string') {
-            try {
-                const parsedKeys = JSON.parse(viteKeyString);
-                if (Array.isArray(parsedKeys)) {
-                    keysFromServer = parsedKeys;
-                }
-            } catch (e) {
-                console.error("Lỗi khi phân tích API keys từ môi trường build:", e);
-            }
-        }
+        keysFromServer = __VITE_API_KEYS__;
     } 
     // Environment 2: Google AI Studio or similar web-based editor
     // If the Vite variable isn't there, check for the AI Studio environment.
