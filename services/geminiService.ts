@@ -1,5 +1,4 @@
 
-
 import { GoogleGenAI } from "@google/genai";
 import { DEV_MODE_ENABLED } from './devConfig';
 
@@ -71,34 +70,33 @@ const ensureInitialized = (): Promise<void> => {
 
 
 /**
- * Gửi văn bản tiếng Việt đã được dịch thô đến Gemini để biên dịch lại cho mượt mà hơn, hỗ trợ streaming.
+ * Gửi văn bản tiếng Việt đã được dịch thô đến Gemini để biên dịch lại cho mượt mà hơn.
  * @param rawText Văn bản gốc cần xử lý.
- * @param onChunk Callback được gọi với mỗi phần văn bản được dịch.
- * @param signal AbortSignal để hủy yêu cầu.
- * @returns Toàn bộ văn bản đã được tối ưu hóa sau khi stream kết thúc.
+ * @returns Văn bản đã được tối ưu hóa.
  */
-export const refineVietnameseText = async (rawText: string, onChunk: (chunk: string) => void, signal: AbortSignal): Promise<string> => {
+export const refineVietnameseText = async (rawText: string): Promise<string> => {
   if (DEV_MODE_ENABLED) {
     console.warn("DEV MODE: `refineVietnameseText` is returning mock data.");
-    const mockContent = `[CHẾ ĐỘ DEV ĐÃ BẬT]\nNội dung sau đây là giả lập, không được dịch bởi AI.\n\n--- BẮT ĐẦU NỘI DUNG GỐC ---\n${rawText}\n--- KẾT THÚC NỘI DUNG GỐC ---`;
-    const chunks = mockContent.split(' ');
-    let fullText = '';
-    for (const chunk of chunks) {
-        if (signal.aborted) throw new Error('Yêu cầu đã bị hủy.');
-        await new Promise(resolve => setTimeout(resolve, 50)); // Giả lập độ trễ stream
-        const textChunk = chunk + ' ';
-        onChunk(textChunk);
-        fullText += textChunk;
-    }
-    return fullText.trim();
+    return new Promise(resolve => {
+      setTimeout(() => {
+        resolve(`[CHẾ ĐỘ DEV ĐÃ BẬT]\nNội dung sau đây là giả lập, không được dịch bởi AI.\n\n--- BẮT ĐẦU NỘI DUNG GỐC ---\n${rawText}\n--- KẾT THÚC NỘI DUNG GỐC ---`);
+      }, 800); // Giả lập độ trễ mạng
+    });
   }
 
-  await ensureInitialized();
+  try {
+    await ensureInitialized();
+  } catch (error) {
+    // If initialization fails, re-throw the descriptive error.
+    throw error;
+  }
 
   if (apiKeys.length === 0) {
+    // This case should be caught by initialization, but it's a safeguard.
     throw new Error("Không có API key nào được cấu hình để thực hiện yêu cầu.");
   }
 
+  // Loop through available keys to find one that works (key rotation and retry).
   const startingKeyIndex = currentKeyIndex;
   for (let i = 0; i < apiKeys.length; i++) {
     const keyToTryIndex = (startingKeyIndex + i) % apiKeys.length;
@@ -120,7 +118,7 @@ Nhiệm vụ của bạn là đọc đoạn văn bản tiếng Việt dưới đ
 ${rawText}
 ---`;
     
-      const responseStream = await ai.models.generateContentStream({
+      const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: contents,
         config: {
@@ -130,35 +128,26 @@ ${rawText}
         }
       });
 
-      let fullText = '';
-      for await (const chunk of responseStream) {
-        if (signal.aborted) {
-           console.log("Stream bị hủy bỏ bởi người dùng.");
-           throw new Error('Yêu cầu đã bị hủy.');
-        }
-        const chunkText = chunk.text;
-        if(chunkText){
-            onChunk(chunkText);
-            fullText += chunkText;
-        }
+      const refinedText = response.text;
+      if (!refinedText) {
+          throw new Error("API không trả về nội dung nào.");
       }
 
+      // Success! Update the currentKeyIndex for the next call to distribute load.
       currentKeyIndex = (keyToTryIndex + 1) % apiKeys.length;
-      return fullText.trim();
+      return refinedText.trim();
 
     } catch (error) {
       console.error(`Lỗi khi sử dụng API key #${keyToTryIndex + 1}. Đang thử key tiếp theo...`, error);
-      if (i === apiKeys.length - 1) {
+      if (i === apiKeys.length - 1) { // If this was the last key to try
         if (error instanceof Error && error.message.includes('API key not valid')) {
              throw new Error("Tất cả các API key cung cấp đều không hợp lệ hoặc đã hết hạn.");
-        }
-        if (error instanceof Error && error.message.includes('Yêu cầu đã bị hủy')) {
-            throw error; // Propagate cancellation error
         }
         throw new Error("Không thể kết nối đến dịch vụ biên dịch sau khi đã thử với tất cả các API key.");
       }
     }
   }
 
+  // This part of the code should be unreachable if there's at least one API key.
   throw new Error("Không thể hoàn thành yêu cầu biên dịch.");
 };
