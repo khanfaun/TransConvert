@@ -12,6 +12,7 @@ export interface StoryData {
     bookmark?: {
         chapter: string;
         scrollPosition: number;
+        readToIndex?: number; // Index of the paragraph read up to
     };
 }
 export interface Library {

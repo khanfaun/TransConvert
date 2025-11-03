@@ -146,6 +146,31 @@
         font-family: var(--font-family, var(--font-sans));
         transition: background-color 0.3s ease, color 0.3s ease;
       }
+
+      /* Custom scrollbar for reader content */
+      .reader-content::-webkit-scrollbar {
+        width: 10px;
+      }
+
+      .reader-content::-webkit-scrollbar-track {
+        background: transparent;
+      }
+
+      .reader-content::-webkit-scrollbar-thumb {
+        background-color: var(--color-border-primary);
+        border-radius: 20px;
+        border: 3px solid var(--color-bg-primary);
+      }
+
+      .reader-content::-webkit-scrollbar-thumb:hover {
+        background-color: var(--color-text-muted);
+      }
+
+      /* For Firefox */
+      .reader-content {
+        scrollbar-width: thin;
+        scrollbar-color: var(--color-border-primary) transparent;
+      }
     </style>
   </head>
   <body>

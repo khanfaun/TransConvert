@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { refineVietnameseText } from './services/geminiService';
-import { SpinnerIcon, CopyIcon, CheckIcon, CloseIcon, BookOpenIcon, ChevronDownIcon, PlusIcon, TagIcon, SettingsIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowLeftIcon, TrashIcon, BookmarkIcon, BookmarkSolidIcon, SaveIcon, CloudIcon, CloudCheckIcon, AlertTriangleIcon } from './components/Icons';
+import { SpinnerIcon, CopyIcon, CheckIcon, CloseIcon, BookOpenIcon, ChevronDownIcon, PlusIcon, TagIcon, SettingsIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowLeftIcon, TrashIcon, BookmarkIcon, BookmarkSolidIcon, SaveIcon, CloudIcon, CloudCheckIcon, AlertTriangleIcon, EditIcon, RefreshIcon } from './components/Icons';
 import { loadLastStoryName, saveLastStoryName, loadSettings, saveSettings, AppSettings } from './services/storageService';
 import { listenToLibraryChanges, saveLibraryToFirebase } from './services/firebaseService';
 
@@ -24,13 +24,18 @@ interface StoryData {
   bookmark?: {
     chapter: string;
     scrollPosition: number; // 0 to 1, representing percentage
+    readToIndex?: number; // Index of the paragraph read up to
   };
 }
 interface Library {
   [storyName: string]: StoryData;
 }
 type SyncState = 'idle' | 'syncing' | 'synced' | 'error';
-
+interface RenameModalData {
+  type: 'story' | 'chapter';
+  oldName: string;
+  storyName?: string; // For chapter rename
+}
 
 // ---- HELPER FUNCTIONS ---- //
 const createNewPanel = (): PanelState => ({
@@ -51,7 +56,8 @@ const TranslationPanel: React.FC<{
   onUpdate: (id: string, updates: Partial<PanelState>) => void;
   onRemove: (id: string) => void;
   canBeRemoved: boolean;
-}> = ({ panel, onUpdate, onRemove, canBeRemoved }) => {
+  onRetry: (id: string) => void;
+}> = ({ panel, onUpdate, onRemove, canBeRemoved, onRetry }) => {
   const { id, storyName, chapterNumber, inputText, tags, isLoading, error } = panel;
   
   return (
@@ -125,7 +131,22 @@ const TranslationPanel: React.FC<{
         />
       </div>
 
-      {error && <p className="text-red-600 text-center bg-red-100 p-3 rounded-lg">{error}</p>}
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-800 p-4 rounded-lg flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <AlertTriangleIcon className="w-6 h-6 flex-shrink-0" />
+            <p className="text-sm font-semibold">{error}</p>
+          </div>
+          <button
+            onClick={() => onRetry(id)}
+            disabled={isLoading}
+            className="p-2 rounded-full bg-red-100 hover:bg-red-200 disabled:opacity-50 transition-colors"
+            aria-label="Thử lại"
+          >
+            <RefreshIcon className={`w-5 h-5 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
+        </div>
+      )}
     </div>
   );
 };
@@ -161,7 +182,7 @@ const SettingsModal: React.FC<{
   
   return (
       <div
-        className="fixed inset-0 bg-[var(--color-backdrop)] backdrop-blur-sm flex items-center justify-center z-50 p-4"
+        className="fixed inset-0 bg-[var(--color-backdrop)] backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in"
         onClick={onClose}
         aria-modal="true"
         role="dialog"
@@ -226,6 +247,91 @@ const SettingsModal: React.FC<{
   )
 }
 
+const RenameModal: React.FC<{
+  data: RenameModalData | null;
+  onClose: () => void;
+  onConfirm: (newName: string) => void;
+  library: Library;
+}> = ({ data, onClose, onConfirm, library }) => {
+  const [newName, setNewName] = useState('');
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (data) {
+      setNewName(data.oldName);
+      setError(''); // Reset error when modal opens
+    }
+  }, [data]);
+
+  if (!data) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedNewName = newName.trim();
+    if (!trimmedNewName || trimmedNewName === data.oldName) {
+      onClose();
+      return;
+    }
+    
+    // Validation
+    if (data.type === 'story' && library[trimmedNewName]) {
+      setError("Tên truyện này đã tồn tại.");
+      return;
+    }
+    if (data.type === 'chapter' && data.storyName && library[data.storyName]?.chapters[trimmedNewName]) {
+      setError(`Chương "${trimmedNewName}" đã tồn tại.`);
+      return;
+    }
+
+    onConfirm(trimmedNewName);
+  };
+
+  const title = data.type === 'story' ? 'Đổi tên truyện' : 'Đổi số chương';
+  const label = data.type === 'story' ? 'Tên truyện mới' : 'Số chương mới';
+
+  return (
+    <div
+      className="fixed inset-0 bg-[var(--color-backdrop)] backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in"
+      onClick={onClose}
+      aria-modal="true"
+      role="dialog"
+    >
+      <div
+        className="bg-[var(--color-bg-secondary)] rounded-2xl shadow-2xl shadow-[var(--shadow-color)] w-full max-w-md flex flex-col transform animate-fade-in-scale"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-center justify-between p-4 sm:p-5 border-b border-[var(--color-border-secondary)]">
+          <h2 className="text-xl font-bold text-[var(--color-text-primary)]">{title}</h2>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-[var(--color-bg-active)]" aria-label="Đóng">
+            <CloseIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
+          </button>
+        </header>
+        <form onSubmit={handleSubmit}>
+          <div className="p-6 space-y-4">
+            <div>
+              <label htmlFor="new-name-input" className="text-sm font-semibold text-[var(--color-text-secondary)]">{label}</label>
+              <input
+                id="new-name-input"
+                type="text"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                className="mt-1 w-full p-3 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:ring-2 focus:ring-[var(--color-ring)]"
+                autoFocus
+              />
+            </div>
+            {error && <p className="text-red-500 text-sm">{error}</p>}
+          </div>
+          <footer className="flex justify-end gap-3 p-4 bg-[var(--color-bg-tertiary)] rounded-b-2xl">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-active)]">Hủy</button>
+            <button type="submit" className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] hover:bg-[var(--color-accent-hover)]">Xác nhận</button>
+          </footer>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+
 // ---- READER PAGE COMPONENT ---- //
 const ReaderPage: React.FC<{
   storyName: string;
@@ -236,20 +342,27 @@ const ReaderPage: React.FC<{
   settings: AppSettings;
   onSetBookmark: (story: string, chapter: string, scrollPosition: number) => void;
   onRemoveBookmark: (story: string) => void;
-}> = ({ storyName, chapterNumber, library, onChapterChange, onExit, settings, onSetBookmark, onRemoveBookmark }) => {
+  onSetReadToIndex: (story: string, chapter: string, index: number) => void;
+  onOpenSettings: () => void;
+}> = ({ storyName, chapterNumber, library, onChapterChange, onExit, settings, onSetBookmark, onRemoveBookmark, onSetReadToIndex, onOpenSettings }) => {
   const [copySuccess, setCopySuccess] = useState(false);
   const [isChapterListOpen, setIsChapterListOpen] = useState(false);
   const chapterListRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<number | null>(null);
 
-  const chapterText = library[storyName]?.chapters?.[chapterNumber] || "Không tìm thấy nội dung chương.";
+  const [hoveredParagraph, setHoveredParagraph] = useState<number | null>(null);
+  const storyData = library[storyName];
+  const bookmark = storyData?.bookmark;
+
+  const { chapterText, paragraphs } = useMemo(() => {
+    const text = storyData?.chapters?.[chapterNumber] || "Không tìm thấy nội dung chương.";
+    const para = text.split(/\n\s*\n/).filter(p => p.trim() !== '');
+    return { chapterText: text, paragraphs: para };
+  }, [storyData, chapterNumber]);
 
   const { chapterList, prevChapter, nextChapter } = useMemo(() => {
-    const storyData = library[storyName];
-    if (!storyData) {
-      return { chapterList: [], prevChapter: null, nextChapter: null };
-    }
+    if (!storyData) return { chapterList: [], prevChapter: null, nextChapter: null };
     const chapters = Object.keys(storyData.chapters).sort((a, b) => parseFloat(a) - parseFloat(b));
     const currentIndex = chapters.indexOf(chapterNumber);
     const prev = currentIndex > 0 ? chapters[currentIndex - 1] : null;
@@ -259,8 +372,6 @@ const ReaderPage: React.FC<{
 
   // Restore scroll position
   useEffect(() => {
-    const storyData = library[storyName];
-    const bookmark = storyData?.bookmark;
     if (contentRef.current && bookmark && bookmark.chapter === chapterNumber) {
         const timer = setTimeout(() => {
             const contentElement = contentRef.current;
@@ -278,43 +389,28 @@ const ReaderPage: React.FC<{
   useEffect(() => {
     const contentElement = contentRef.current;
     const handleScroll = () => {
-        if (scrollTimeoutRef.current) {
-            window.clearTimeout(scrollTimeoutRef.current);
-        }
+        if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
         scrollTimeoutRef.current = window.setTimeout(() => {
             if (contentElement) {
                 const { scrollTop, scrollHeight, clientHeight } = contentElement;
-                if (scrollHeight > clientHeight) {
-                    const scrollPercentage = scrollTop / (scrollHeight - clientHeight);
-                    onSetBookmark(storyName, chapterNumber, Math.min(1, Math.max(0, scrollPercentage)));
-                } else {
-                    onSetBookmark(storyName, chapterNumber, 0);
-                }
+                const scrollPercentage = scrollHeight > clientHeight ? scrollTop / (scrollHeight - clientHeight) : 0;
+                onSetBookmark(storyName, chapterNumber, Math.min(1, Math.max(0, scrollPercentage)));
             }
         }, 500);
     };
-
     contentElement?.addEventListener('scroll', handleScroll, { passive: true });
     return () => {
         contentElement?.removeEventListener('scroll', handleScroll);
-        if (scrollTimeoutRef.current) {
-            window.clearTimeout(scrollTimeoutRef.current);
-        }
+        if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
     };
   }, [storyName, chapterNumber, onSetBookmark]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-        if (chapterListRef.current && !chapterListRef.current.contains(event.target as Node)) {
-            setIsChapterListOpen(false);
-        }
+        if (chapterListRef.current && !chapterListRef.current.contains(event.target as Node)) setIsChapterListOpen(false);
     };
-    if (isChapterListOpen) {
-        document.addEventListener('mousedown', handleClickOutside);
-    }
-    return () => {
-        document.removeEventListener('mousedown', handleClickOutside);
-    };
+    if (isChapterListOpen) document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isChapterListOpen]);
 
   const handleCopyToClipboard = useCallback(() => {
@@ -330,23 +426,23 @@ const ReaderPage: React.FC<{
   }
 
   const handleToggleBookmark = () => {
-    const isBookmarked = library[storyName]?.bookmark?.chapter === chapterNumber;
-    if (isBookmarked) {
+    if (bookmark?.chapter === chapterNumber) {
         onRemoveBookmark(storyName);
     } else {
         const contentElement = contentRef.current;
-        if (contentElement) {
-            const { scrollTop, scrollHeight, clientHeight } = contentElement;
-            const scrollPercentage = scrollHeight > clientHeight ? scrollTop / (scrollHeight - clientHeight) : 0;
-            onSetBookmark(storyName, chapterNumber, Math.min(1, Math.max(0, scrollPercentage)));
-        } else {
-            onSetBookmark(storyName, chapterNumber, 0); // Fallback to top if ref is not available
-        }
+        const scrollPercentage = contentElement && contentElement.scrollHeight > contentElement.clientHeight 
+            ? contentElement.scrollTop / (contentElement.scrollHeight - contentElement.clientHeight) : 0;
+        onSetBookmark(storyName, chapterNumber, Math.min(1, Math.max(0, scrollPercentage)));
     }
   };
 
-  const isBookmarked = library[storyName]?.bookmark?.chapter === chapterNumber;
-
+  const handleMouseEnterPara = (index: number) => {
+    setHoveredParagraph(index);
+  };
+  const handleMouseLeavePara = () => {
+    setHoveredParagraph(null);
+  };
+  
   const readerStyle = useMemo(() => {
     const style: React.CSSProperties = {};
     const fontMap: Record<AppSettings['font'], string> = { sans: 'var(--font-sans)', serif: 'var(--font-serif)', mono: 'var(--font-mono)' };
@@ -416,13 +512,13 @@ const ReaderPage: React.FC<{
           <h2 className="text-lg sm:text-xl font-bold text-[var(--color-text-primary)] text-center truncate px-2" title={`${storyName} - Chương ${chapterNumber}`}>
             {`${storyName} - Chương ${chapterNumber}`}
           </h2>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             <button
                 onClick={handleToggleBookmark}
                 className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
-                aria-label={isBookmarked ? "Bỏ đánh dấu chương" : "Đánh dấu chương này"}
+                aria-label={bookmark?.chapter === chapterNumber ? "Bỏ đánh dấu chương" : "Đánh dấu chương này"}
             >
-                {isBookmarked 
+                {bookmark?.chapter === chapterNumber 
                     ? <BookmarkSolidIcon className="w-6 h-6 text-[var(--color-accent-primary)]" /> 
                     : <BookmarkIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
                 }
@@ -434,16 +530,42 @@ const ReaderPage: React.FC<{
               >
                 {copySuccess ? <CheckIcon className="w-6 h-6 text-green-600" /> : <CopyIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />}
             </button>
+             <button
+                onClick={onOpenSettings}
+                className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
+                aria-label="Cài đặt"
+            >
+                <SettingsIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
+            </button>
           </div>
         </header>
 
-        <div className="p-4 sm:p-6 md:p-8 overflow-y-auto flex-grow w-full max-w-4xl mx-auto" ref={contentRef}>
-          <pre
-            className="text-left leading-relaxed text-[var(--color-text-primary)] whitespace-pre-wrap"
-            style={readerStyle}
-          >
-            {chapterText}
-          </pre>
+        <div className="p-4 sm:p-6 md:p-8 overflow-y-auto flex-grow w-full max-w-4xl mx-auto reader-content" ref={contentRef}>
+            <div
+              className="text-left leading-relaxed text-[var(--color-text-primary)]"
+              style={readerStyle}
+            >
+              {paragraphs.map((p, index) => {
+                  const isRead = bookmark?.chapter === chapterNumber && bookmark?.readToIndex != null && index < bookmark.readToIndex;
+                  return (
+                    <p key={index}
+                      onMouseEnter={() => handleMouseEnterPara(index)}
+                      onMouseLeave={handleMouseLeavePara}
+                      onClick={() => !isRead && onSetReadToIndex(storyName, chapterNumber, index + 1)}
+                      className={`transition-all duration-300 ${
+                        isRead 
+                        ? 'opacity-40' 
+                        : 'opacity-100 cursor-pointer'
+                      } ${
+                        hoveredParagraph === index && !isRead ? 'underline decoration-from-font' : ''
+                      }`}
+                      style={{ whiteSpace: 'pre-wrap', marginBottom: '1em', textUnderlineOffset: '4px' }}
+                    >
+                      {p}
+                    </p>
+                  );
+              })}
+            </div>
         </div>
 
         <footer className="border-t border-[var(--color-border-secondary)] flex-shrink-0 bg-[var(--color-bg-primary)]">
@@ -454,30 +576,17 @@ const ReaderPage: React.FC<{
 }
 
 const SyncStatusIndicator: React.FC<{ status: SyncState }> = ({ status }) => {
-  const getStatusContent = () => {
-    switch (status) {
-      case 'syncing':
-        return { icon: <SpinnerIcon className="w-5 h-5 animate-spin" />, text: 'Đang đồng bộ...' };
-      case 'synced':
-        return { icon: <CloudCheckIcon className="w-5 h-5 text-green-500" />, text: 'Đã đồng bộ' };
-      case 'error':
-        return { icon: <AlertTriangleIcon className="w-5 h-5 text-red-500" />, text: 'Lỗi đồng bộ' };
-      default:
-        return { icon: <CloudIcon className="w-5 h-5" />, text: 'Đã kết nối' };
-    }
-  };
-
-  if (status === 'idle') return null;
-
-  const { icon, text } = getStatusContent();
-
+  if (status !== 'error') {
+    return null;
+  }
+  
   return (
-    <div className={`fixed bottom-4 right-4 bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] px-4 py-2 rounded-lg shadow-lg flex items-center gap-3 text-sm font-semibold transition-all animate-fade-in z-50`}>
-        {icon}
-        <span>{text}</span>
+    <div className="fixed bottom-4 right-4 bg-[var(--color-bg-secondary)] shadow-lg flex items-center p-3 rounded-full transition-all animate-fade-in z-50">
+        <AlertTriangleIcon className="w-5 h-5 text-red-500" />
     </div>
   );
 };
+
 
 // ---- MAIN APP COMPONENT ---- //
 
@@ -500,6 +609,7 @@ const App: React.FC = () => {
   
   const [currentView, setCurrentView] = useState<'editor' | 'reader'>('editor');
   const [readerData, setReaderData] = useState<{ story: string; chapter: string } | null>(null);
+  const [renameModalData, setRenameModalData] = useState<RenameModalData | null>(null);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -521,13 +631,9 @@ const App: React.FC = () => {
 
   const handleSetSyncState = (state: SyncState) => {
     setSyncState(state);
-    if (syncTimerRef.current) {
-        clearTimeout(syncTimerRef.current);
-    }
-    if (state === 'synced' || state === 'error') {
-        syncTimerRef.current = window.setTimeout(() => {
-            setSyncState('idle');
-        }, 3000);
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    if (state === 'error') {
+        syncTimerRef.current = window.setTimeout(() => setSyncState('idle'), 4000);
     }
   };
   
@@ -544,37 +650,18 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setIsLibraryLoading(true);
-    
-    // Bắt đầu lắng nghe thay đổi từ Firebase
     const unsubscribe = listenToLibraryChanges(loadedLibrary => {
-        // Migration để đảm bảo dữ liệu cũ tương thích
-        const migratedLibrary = { ...loadedLibrary };
-        for (const storyName in migratedLibrary) {
-            const story = migratedLibrary[storyName];
-            if (!story.tags) story.tags = [];
-            if (!story.chapters) story.chapters = {};
-        }
-
-        setLibrary(migratedLibrary);
-
-        if (isLibraryLoading) { // Chỉ thực hiện logic này lần đầu
+        setLibrary(loadedLibrary);
+        if (isLibraryLoading) {
             const lastStoryName = loadLastStoryName();
             let initialPanelState = createNewPanel();
-
-            if (lastStoryName && migratedLibrary[lastStoryName]) {
-                const lastStoryData = migratedLibrary[lastStoryName];
-                const initialTags = lastStoryData.tags?.join(', ') || '';
+            if (lastStoryName && loadedLibrary[lastStoryName]) {
+                const lastStoryData = loadedLibrary[lastStoryName];
                 const chapterKeys = Object.keys(lastStoryData.chapters);
-                let nextChapterNumber = '1';
-
-                if (chapterKeys.length > 0) {
-                    const maxChapter = Math.max(...chapterKeys.map(k => parseFloat(k)).filter(n => !isNaN(n)));
-                    if (isFinite(maxChapter)) {
-                        nextChapterNumber = (Math.floor(maxChapter) + 1).toString();
-                    }
-                }
-                
-                initialPanelState = { ...initialPanelState, storyName: lastStoryName, tags: initialTags, chapterNumber: nextChapterNumber };
+                const nextChapterNumber = chapterKeys.length > 0
+                    ? (Math.floor(Math.max(...chapterKeys.map(k => parseFloat(k)).filter(n => !isNaN(n)))) + 1).toString()
+                    : '1';
+                initialPanelState = { ...initialPanelState, storyName: lastStoryName, tags: lastStoryData.tags?.join(', ') || '', chapterNumber: nextChapterNumber };
             } else if (lastStoryName) {
                 initialPanelState = { ...initialPanelState, storyName: lastStoryName, chapterNumber: '1', tags: '' };
             }
@@ -582,13 +669,9 @@ const App: React.FC = () => {
             setIsLibraryLoading(false);
         }
     });
-
-    // Hàm cleanup sẽ được gọi khi component bị unmount
     return () => {
         unsubscribe();
-        if (syncTimerRef.current) {
-            clearTimeout(syncTimerRef.current);
-        }
+        if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -626,18 +709,36 @@ const App: React.FC = () => {
   const handleSetBookmark = useCallback(async (storyName: string, chapter: string, scrollPosition: number) => {
     const newLibrary = JSON.parse(JSON.stringify(library));
     if (newLibrary[storyName]) {
-        newLibrary[storyName].bookmark = { chapter, scrollPosition };
+        if (!newLibrary[storyName].bookmark) {
+            newLibrary[storyName].bookmark = { chapter, scrollPosition };
+        } else {
+            newLibrary[storyName].bookmark.chapter = chapter;
+            newLibrary[storyName].bookmark.scrollPosition = scrollPosition;
+        }
         await saveLibrary(newLibrary);
     }
-  }, [library]);
+  }, [library]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSetReadToIndex = useCallback(async (storyName: string, chapter: string, readToIndex: number) => {
+    const newLibrary = JSON.parse(JSON.stringify(library));
+    if (newLibrary[storyName]) {
+        if (!newLibrary[storyName].bookmark) {
+            newLibrary[storyName].bookmark = { chapter, scrollPosition: 0, readToIndex };
+        } else {
+            newLibrary[storyName].bookmark.readToIndex = readToIndex;
+            newLibrary[storyName].bookmark.chapter = chapter; // Ensure correct chapter is bookmarked
+        }
+        await saveLibrary(newLibrary);
+    }
+  }, [library]); // eslint-disable-line react-hooks/exhaustive-deps
   
   const handleRemoveBookmark = useCallback(async (storyName: string) => {
       const newLibrary = JSON.parse(JSON.stringify(library));
-      if (newLibrary[storyName] && newLibrary[storyName].bookmark) {
+      if (newLibrary[storyName]?.bookmark) {
           delete newLibrary[storyName].bookmark;
           await saveLibrary(newLibrary);
       }
-  }, [library]);
+  }, [library]); // eslint-disable-line react-hooks/exhaustive-deps
   
   const resetPanelsAfterSuccess = () => {
       const lastSuccessfulPanel = panels[panels.length - 1];
@@ -660,36 +761,56 @@ const App: React.FC = () => {
             return;
         }
     }
-
     setIsDirectSaving(true);
-    const totalPanels = panels.length;
     const newLibrary = JSON.parse(JSON.stringify(library));
-
-    for (let i = 0; i < totalPanels; i++) {
+    for (let i = 0; i < panels.length; i++) {
         const panel = panels[i];
         const trimmedStoryName = panel.storyName.trim();
         saveLastStoryName(trimmedStoryName);
-
-        const trimmedChapterNumber = panel.chapterNumber.trim();
-        const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
-
         if (!newLibrary[trimmedStoryName]) {
             newLibrary[trimmedStoryName] = { chapters: {}, lastModified: Date.now(), tags: [] };
         }
-        newLibrary[trimmedStoryName].chapters[trimmedChapterNumber] = panel.inputText;
+        newLibrary[trimmedStoryName].chapters[panel.chapterNumber.trim()] = panel.inputText;
         newLibrary[trimmedStoryName].lastModified = Date.now();
-        newLibrary[trimmedStoryName].tags = storyTags;
-        
-        if (i === 0 && currentView === 'editor') {
-          openReader(trimmedStoryName, trimmedChapterNumber);
-        }
+        newLibrary[trimmedStoryName].tags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+        if (i === 0) openReader(trimmedStoryName, panel.chapterNumber.trim());
     }
-    
     await saveLibrary(newLibrary);
     setIsDirectSaving(false);
     resetPanelsAfterSuccess();
   };
 
+  const handleTranslateSinglePanel = async (panelId: string): Promise<boolean> => {
+    const panel = panels.find(p => p.id === panelId);
+    if (!panel) return false;
+
+    updatePanelState(panel.id, { isLoading: true, error: null });
+    const trimmedStoryName = panel.storyName.trim();
+    saveLastStoryName(trimmedStoryName);
+
+    try {
+        const result = await refineVietnameseText(panel.inputText);
+        const newLibrary = JSON.parse(JSON.stringify(library));
+        const trimmedChapterNumber = panel.chapterNumber.trim();
+        const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+        
+        if (!newLibrary[trimmedStoryName]) {
+            newLibrary[trimmedStoryName] = { chapters: {}, lastModified: Date.now(), tags: [] };
+        }
+        newLibrary[trimmedStoryName].chapters[trimmedChapterNumber] = result;
+        newLibrary[trimmedStoryName].lastModified = Date.now();
+        newLibrary[trimmedStoryName].tags = storyTags;
+        
+        await saveLibrary(newLibrary);
+        updatePanelState(panel.id, { isLoading: false });
+        return true;
+    } catch (err) {
+        console.error(err);
+        const errorMessage = err instanceof Error ? err.message : 'Lỗi dịch chương này. Vui lòng thử lại.';
+        updatePanelState(panel.id, { error: errorMessage, isLoading: false });
+        return false;
+    }
+  };
 
   const startBatchTranslation = async () => {
     for (const panel of panels) {
@@ -698,49 +819,22 @@ const App: React.FC = () => {
             return;
         }
     }
-
     setIsBatchProcessing(true);
     const totalPanels = panels.length;
-    let newLibrary = JSON.parse(JSON.stringify(library));
-
     for (let i = 0; i < totalPanels; i++) {
         const panel = panels[i];
         setBatchProgress(`Đang xử lý chương ${i + 1}/${totalPanels}...`);
-        updatePanelState(panel.id, { isLoading: true, error: null });
-
-        const trimmedStoryName = panel.storyName.trim();
-        saveLastStoryName(trimmedStoryName);
-
-        try {
-            const result = await refineVietnameseText(panel.inputText);
-
-            const trimmedChapterNumber = panel.chapterNumber.trim();
-            const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
-            
-            newLibrary = JSON.parse(JSON.stringify(newLibrary)); // Re-clone for immutability
-            if (!newLibrary[trimmedStoryName]) {
-                newLibrary[trimmedStoryName] = { chapters: {}, lastModified: Date.now(), tags: [] };
-            }
-            newLibrary[trimmedStoryName].chapters[trimmedChapterNumber] = result;
-            newLibrary[trimmedStoryName].lastModified = Date.now();
-            newLibrary[trimmedStoryName].tags = storyTags;
-            
-            await saveLibrary(newLibrary); // Save after each successful translation
-
-            updatePanelState(panel.id, { isLoading: false });
-
-            if (i === 0 && currentView === 'editor') {
-              openReader(trimmedStoryName, trimmedChapterNumber);
-            }
-
-        } catch (err) {
-            console.error(err);
-            const errorMessage = err instanceof Error ? err.message : 'Lỗi dịch chương này. Quá trình đã dừng lại.';
-            updatePanelState(panel.id, { error: errorMessage, isLoading: false });
+        
+        const success = await handleTranslateSinglePanel(panel.id);
+        if (!success) {
             setIsBatchProcessing(false);
             setBatchProgress(null);
-            alert(errorMessage);
+            alert('Quá trình dịch đã dừng lại do có lỗi. Vui lòng kiểm tra và thử lại.');
             return;
+        }
+
+        if (i === 0) {
+          openReader(panel.storyName.trim(), panel.chapterNumber.trim());
         }
 
         if (i < totalPanels - 1) {
@@ -749,7 +843,6 @@ const App: React.FC = () => {
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
     }
-
     setIsBatchProcessing(false);
     setBatchProgress(null);
     resetPanelsAfterSuccess();
@@ -760,63 +853,69 @@ const App: React.FC = () => {
     setReaderData(null);
   }, []);
   
-  const toggleStory = (story: string) => {
-    setActiveStory(activeStory === story ? null : story);
-  };
-
+  const toggleStory = (story: string) => setActiveStory(activeStory === story ? null : story);
+  const renameStory = (oldStoryName: string) => setRenameModalData({ type: 'story', oldName: oldStoryName });
+  const renameChapter = (storyName: string, oldChapterNumber: string) => setRenameModalData({ type: 'chapter', oldName: oldChapterNumber, storyName: storyName });
+  
   const deleteStory = async (storyName: string) => {
     const newLibrary = { ...library };
     delete newLibrary[storyName];
     await saveLibrary(newLibrary);
-    if (activeStory === storyName) {
-        setActiveStory(null);
-    }
+    if (activeStory === storyName) setActiveStory(null);
   };
-
+  
   const deleteChapter = async (storyName: string, chapterNumber: string) => {
-      const newLibrary = JSON.parse(JSON.stringify(library)); // Deep copy
-      if (newLibrary[storyName] && newLibrary[storyName].chapters) {
+      const newLibrary = JSON.parse(JSON.stringify(library));
+      if (newLibrary[storyName]?.chapters) {
           delete newLibrary[storyName].chapters[chapterNumber];
-          
-          if (newLibrary[storyName].bookmark?.chapter === chapterNumber) {
-            delete newLibrary[storyName].bookmark;
-          }
-          
+          if (newLibrary[storyName].bookmark?.chapter === chapterNumber) delete newLibrary[storyName].bookmark;
           await saveLibrary(newLibrary);
       }
+  };
+
+  const handleConfirmRename = async (newName: string) => {
+    if (!renameModalData) return;
+    const { type, oldName, storyName } = renameModalData;
+    if (type === 'story') {
+      const newLibrary = { ...library };
+      newLibrary[newName] = newLibrary[oldName];
+      delete newLibrary[oldName];
+      await saveLibrary(newLibrary);
+      if (activeStory === oldName) setActiveStory(newName);
+      if (readerData?.story === oldName) setReaderData({ ...readerData, story: newName });
+    } else if (type === 'chapter' && storyName) {
+      const newLibrary = JSON.parse(JSON.stringify(library));
+      const storyData = newLibrary[storyName];
+      if (storyData?.chapters) {
+        storyData.chapters[newName] = storyData.chapters[oldName];
+        delete storyData.chapters[oldName];
+        storyData.lastModified = Date.now();
+        if (storyData.bookmark?.chapter === oldName) storyData.bookmark.chapter = newName;
+        await saveLibrary(newLibrary);
+        if (readerData?.story === storyName && readerData?.chapter === oldName) setReaderData({ story: storyName, chapter: newName });
+      }
+    }
+    setRenameModalData(null);
   };
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (isSettingsModalOpen) {
-          setIsSettingsModalOpen(false);
-        } else if (currentView === 'reader') {
-          exitReader();
-        }
+        if (renameModalData) setRenameModalData(null);
+        else if (isSettingsModalOpen) setIsSettingsModalOpen(false);
+        else if (currentView === 'reader') exitReader();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSettingsModalOpen, currentView, exitReader]);
+  }, [isSettingsModalOpen, currentView, exitReader, renameModalData]);
 
-  const allTags = useMemo(() => {
-    const tagsSet = new Set<string>();
-    Object.values(library).forEach((story: StoryData) => {
-        story.tags?.forEach(tag => tagsSet.add(tag));
-    });
-    return Array.from(tagsSet).sort();
-  }, [library]);
+  const allTags = useMemo(() => Array.from(new Set(Object.values(library).flatMap(s => s.tags || []))).sort(), [library]);
 
   const filteredLibraryKeys = useMemo(() => {
     const keys = Object.keys(library);
-    const filtered = activeTagFilter
-      ? keys.filter(key => {
-          const storyData = library[key] as StoryData;
-          return storyData?.tags?.includes(activeTagFilter);
-        })
-      : keys;
-    return filtered.sort((a, b) => (library[b] as StoryData).lastModified - (library[a] as StoryData).lastModified);
+    const filtered = activeTagFilter ? keys.filter(key => library[key]?.tags?.includes(activeTagFilter)) : keys;
+    return filtered.sort((a, b) => library[b].lastModified - library[a].lastModified);
   }, [library, activeTagFilter]);
 
   const isFormInvalid = panels.some(p => !p.storyName.trim() || !p.chapterNumber.trim() || !p.inputText.trim());
@@ -860,6 +959,7 @@ const App: React.FC = () => {
                           onUpdate={updatePanelState}
                           onRemove={removePanel}
                           canBeRemoved={panels.length > 1}
+                          onRetry={handleTranslateSinglePanel}
                         />
                       ))}
                       {!isAnyProcessRunning && <AddPanelButton onClick={addPanel} />}
@@ -875,15 +975,9 @@ const App: React.FC = () => {
                         className="inline-flex items-center justify-center bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-bg-active)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:ring-offset-2 focus:ring-offset-[var(--color-bg-secondary)] transition-all duration-200 disabled:bg-[var(--color-bg-tertiary)] disabled:text-[var(--color-text-muted)] disabled:cursor-not-allowed disabled:shadow-none w-full sm:w-auto"
                       >
                          {isDirectSaving ? (
-                            <>
-                                <SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5" />
-                                Đang lưu...
-                            </>
+                            <><SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5" />Đang lưu...</>
                          ) : (
-                            <>
-                                <SaveIcon className="-ml-1 mr-2 h-5 w-5" />
-                                Lưu Trực Tiếp
-                            </>
+                            <><SaveIcon className="-ml-1 mr-2 h-5 w-5" />Lưu Trực Tiếp</>
                          )}
                       </button>
                       <button
@@ -892,13 +986,8 @@ const App: React.FC = () => {
                       className="inline-flex items-center justify-center bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:ring-offset-2 focus:ring-offset-[var(--color-bg-secondary)] transition-all duration-200 disabled:bg-[var(--color-accent-disabled)] disabled:cursor-not-allowed disabled:shadow-none w-full sm:w-auto"
                       >
                       {isBatchProcessing ? (
-                          <>
-                          <SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5 text-[var(--color-text-accent)]" />
-                          {batchProgress || 'Đang xử lý...'}
-                          </>
-                      ) : (
-                          'Biên Dịch và Lưu Toàn Bộ'
-                      )}
+                          <><SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5 text-[var(--color-text-accent)]" />{batchProgress || 'Đang xử lý...'}</>
+                      ) : ( 'Biên Dịch và Lưu Toàn Bộ' )}
                       </button>
                   </div>
               </div>
@@ -911,26 +1000,15 @@ const App: React.FC = () => {
                   <BookOpenIcon className="w-6 h-6"/>
                   Thư viện truyện đã dịch
                 </h2>
-
                 {allTags.length > 0 && (
                   <div>
-                      <div className="flex items-center gap-2 mb-2 text-sm font-semibold text-[var(--color-text-secondary)]">
-                          <TagIcon className="w-4 h-4" />
-                          <span>Lọc theo thẻ:</span>
-                      </div>
+                      <div className="flex items-center gap-2 mb-2 text-sm font-semibold text-[var(--color-text-secondary)]"><TagIcon className="w-4 h-4" /><span>Lọc theo thẻ:</span></div>
                       <div className="flex flex-wrap gap-2">
-                          <button onClick={() => setActiveTagFilter(null)} className={`px-3 py-1 text-sm rounded-full transition-colors ${activeTagFilter === null ? 'bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold' : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-active)]'}`}>
-                              Tất cả
-                          </button>
-                          {allTags.map(tag => (
-                              <button key={tag} onClick={() => setActiveTagFilter(tag)} className={`px-3 py-1 text-sm rounded-full transition-colors ${activeTagFilter === tag ? 'bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold' : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-active)]'}`}>
-                                  {tag}
-                              </button>
-                          ))}
+                          <button onClick={() => setActiveTagFilter(null)} className={`px-3 py-1 text-sm rounded-full transition-colors ${activeTagFilter === null ? 'bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold' : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-active)]'}`}>Tất cả</button>
+                          {allTags.map(tag => (<button key={tag} onClick={() => setActiveTagFilter(tag)} className={`px-3 py-1 text-sm rounded-full transition-colors ${activeTagFilter === tag ? 'bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold' : 'bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] hover:bg-[var(--color-bg-active)]'}`}>{tag}</button>))}
                       </div>
                   </div>
                 )}
-
                 <div className="space-y-2 max-h-60 overflow-y-auto pr-2 border-t border-[var(--color-border-secondary)] pt-4">
                   {filteredLibraryKeys.map(story => (
                     <div key={story} className="rounded-lg border border-[var(--color-border-primary)]">
@@ -938,69 +1016,31 @@ const App: React.FC = () => {
                             <button onClick={() => toggleStory(story)} className="flex-grow flex justify-between items-center text-left rounded-md -ml-2 p-2 hover:bg-[var(--color-bg-hover)] transition-colors">
                                 <div>
                                     <span className="font-semibold text-[var(--color-text-primary)]">{story}</span>
-                                    <div className="flex flex-wrap gap-1 mt-1">
-                                        {library[story].tags?.map(tag => (
-                                            <span key={tag} className="text-xs bg-[var(--color-accent-subtle-bg)] text-[var(--color-accent-subtle-text)] px-2 py-0.5 rounded-full">{tag}</span>
-                                        ))}
-                                    </div>
+                                    <div className="flex flex-wrap gap-1 mt-1">{library[story].tags?.map(tag => (<span key={tag} className="text-xs bg-[var(--color-accent-subtle-bg)] text-[var(--color-accent-subtle-text)] px-2 py-0.5 rounded-full">{tag}</span>))}</div>
                                 </div>
                                 <ChevronDownIcon className={`w-5 h-5 transition-transform flex-shrink-0 ml-2 text-[var(--color-text-secondary)] ${activeStory === story ? 'rotate-180' : ''}`}/>
                             </button>
-                            <button 
-                                onClick={(e) => { e.stopPropagation(); deleteStory(story); }} 
-                                className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors ml-2 flex-shrink-0" 
-                                aria-label={`Xoá truyện ${story}`}>
-                                <TrashIcon className="w-5 h-5 text-[var(--color-text-muted)] hover:text-red-500" />
-                            </button>
+                            <div className="flex items-center ml-2 flex-shrink-0">
+                                <button onClick={(e) => { e.stopPropagation(); renameStory(story); }} className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label={`Sửa tên truyện ${story}`}><EditIcon className="w-5 h-5 text-[var(--color-text-muted)] hover:text-[var(--color-accent-primary)]" /></button>
+                                <button onClick={(e) => { e.stopPropagation(); deleteStory(story); }} className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label={`Xoá truyện ${story}`}><TrashIcon className="w-5 h-5 text-[var(--color-text-muted)] hover:text-red-500" /></button>
+                            </div>
                         </div>
                       {activeStory === story && (
                         <div className="p-3 border-t border-[var(--color-border-secondary)] bg-[var(--color-bg-hover)]">
-                            {library[story].bookmark && (
-                                <button 
-                                    onClick={() => openReader(story, library[story].bookmark!.chapter)}
-                                    className="w-full flex items-center gap-3 text-left p-2 mb-2 rounded-md bg-[var(--color-accent-subtle-bg)] text-[var(--color-accent-subtle-text)] hover:bg-opacity-80 transition-all font-semibold"
-                                >
-                                    <BookmarkSolidIcon className="w-5 h-5 flex-shrink-0"/>
-                                    <span>Tiếp tục đọc: Chương {library[story].bookmark!.chapter}</span>
-                                </button>
-                            )}
-                            <div className="space-y-1">
-                                {library[story].chapters && Object.keys(library[story].chapters).sort((a, b) => parseFloat(a) - parseFloat(b)).map(chapter => (
-                                  <div key={chapter} className="flex justify-between items-center group rounded-md hover:bg-[var(--color-bg-active)]">
-                                    <button onClick={() => openReader(story, chapter)} className="flex-grow flex items-center gap-2 text-left p-2 text-[var(--color-text-secondary)]">
-                                        {library[story].bookmark?.chapter === chapter ? 
-                                            <BookmarkSolidIcon className="w-4 h-4 text-[var(--color-accent-primary)] flex-shrink-0"/> : 
-                                            <div className="w-4 h-4 flex-shrink-0" />
-                                        }
-                                        <span>Chương {chapter}</span>
-                                    </button>
-                                    <button 
-                                      onClick={() => deleteChapter(story, chapter)} 
-                                      className="p-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" 
-                                      aria-label={`Xoá chương ${chapter}`}>
-                                      <TrashIcon className="w-4 h-4 text-[var(--color-text-muted)]" />
-                                    </button>
-                                  </div>
-                                ))}
-                            </div>
+                            {library[story].bookmark && (<button onClick={() => openReader(story, library[story].bookmark!.chapter)} className="w-full flex items-center gap-3 text-left p-2 mb-2 rounded-md bg-[var(--color-accent-subtle-bg)] text-[var(--color-accent-subtle-text)] hover:bg-opacity-80 transition-all font-semibold"><BookmarkSolidIcon className="w-5 h-5 flex-shrink-0"/><span>Tiếp tục đọc: Chương {library[story].bookmark!.chapter}</span></button>)}
+                            <div className="space-y-1">{library[story].chapters && Object.keys(library[story].chapters).sort((a, b) => parseFloat(a) - parseFloat(b)).map(chapter => (<div key={chapter} className="flex justify-between items-center group rounded-md hover:bg-[var(--color-bg-active)]"><button onClick={() => openReader(story, chapter)} className="flex-grow flex items-center gap-2 text-left p-2 text-[var(--color-text-secondary)]">{library[story].bookmark?.chapter === chapter ? <BookmarkSolidIcon className="w-4 h-4 text-[var(--color-accent-primary)] flex-shrink-0"/> : <div className="w-4 h-4 flex-shrink-0" />}<span>Chương {chapter}</span></button><div className="flex items-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={(e) => { e.stopPropagation(); renameChapter(story, chapter); }} className="p-2 rounded-full" aria-label={`Sửa chương ${chapter}`}><EditIcon className="w-4 h-4 text-[var(--color-text-muted)] hover:text-[var(--color-accent-primary)]" /></button><button onClick={(e) => { e.stopPropagation(); deleteChapter(story, chapter); }} className="p-2 rounded-full" aria-label={`Xoá chương ${chapter}`}><TrashIcon className="w-4 h-4 text-[var(--color-text-muted)] hover:text-red-500" /></button></div></div>))}</div>
                         </div>
                       )}
                     </div>
                   ))}
-                  {filteredLibraryKeys.length === 0 && (
-                      <p className="text-[var(--color-text-muted)] text-center py-4">Không tìm thấy truyện nào với thẻ đã chọn.</p>
-                  )}
+                  {filteredLibraryKeys.length === 0 && (<p className="text-[var(--color-text-muted)] text-center py-4">Không tìm thấy truyện nào với thẻ đã chọn.</p>)}
                 </div>
               </div>
             </div>
           )}
-
-          <footer className="text-center text-sm text-[var(--color-text-muted)] py-6 mt-auto">
-            <p>Powered by Gemini API</p>
-          </footer>
+          <footer className="text-center text-sm text-[var(--color-text-muted)] py-6 mt-auto"><p>Powered by Gemini API</p></footer>
         </main>
       )}
-
       {currentView === 'reader' && readerData && (
         <ReaderPage
           storyName={readerData.story}
@@ -1011,15 +1051,12 @@ const App: React.FC = () => {
           settings={settings}
           onSetBookmark={handleSetBookmark}
           onRemoveBookmark={handleRemoveBookmark}
+          onSetReadToIndex={handleSetReadToIndex}
+          onOpenSettings={() => setIsSettingsModalOpen(true)}
         />
       )}
-
-      <SettingsModal 
-        isOpen={isSettingsModalOpen}
-        onClose={() => setIsSettingsModalOpen(false)}
-        settings={settings}
-        onSettingsChange={handleSettingsChange}
-      />
+      <RenameModal data={renameModalData} onClose={() => setRenameModalData(null)} onConfirm={handleConfirmRename} library={library} />
+      <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} settings={settings} onSettingsChange={handleSettingsChange} />
       <SyncStatusIndicator status={syncState} />
     </>
   );
