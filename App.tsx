@@ -1,3 +1,4 @@
+
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { refineVietnameseText } from './services/geminiService';
 import { SpinnerIcon, CopyIcon, CheckIcon, CloseIcon, BookOpenIcon, ChevronDownIcon, PlusIcon, TagIcon, SettingsIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowLeftIcon, TrashIcon, BookmarkIcon, BookmarkSolidIcon, SaveIcon, CloudIcon, CloudCheckIcon, AlertTriangleIcon, EditIcon, RefreshIcon } from './components/Icons';
@@ -35,6 +36,11 @@ interface RenameModalData {
   type: 'story' | 'chapter';
   oldName: string;
   storyName?: string; // For chapter rename
+}
+interface LiveTranslation {
+    story: string;
+    chapter: string;
+    content: string;
 }
 
 // ---- HELPER FUNCTIONS ---- //
@@ -337,6 +343,7 @@ const ReaderPage: React.FC<{
   storyName: string;
   chapterNumber: string;
   library: Library;
+  liveContent?: string; // Content for streaming translation
   onChapterChange: (story: string, chapter: string) => void;
   onExit: () => void;
   settings: AppSettings;
@@ -344,7 +351,7 @@ const ReaderPage: React.FC<{
   onRemoveBookmark: (story: string) => void;
   onSetReadToIndex: (story: string, chapter: string, index: number) => void;
   onOpenSettings: () => void;
-}> = ({ storyName, chapterNumber, library, onChapterChange, onExit, settings, onSetBookmark, onRemoveBookmark, onSetReadToIndex, onOpenSettings }) => {
+}> = ({ storyName, chapterNumber, library, liveContent, onChapterChange, onExit, settings, onSetBookmark, onRemoveBookmark, onSetReadToIndex, onOpenSettings }) => {
   const [copySuccess, setCopySuccess] = useState(false);
   const [isChapterListOpen, setIsChapterListOpen] = useState(false);
   const chapterListRef = useRef<HTMLDivElement>(null);
@@ -355,11 +362,15 @@ const ReaderPage: React.FC<{
   const storyData = library[storyName];
   const bookmark = storyData?.bookmark;
 
-  const { chapterText, paragraphs } = useMemo(() => {
-    const text = storyData?.chapters?.[chapterNumber] || "Không tìm thấy nội dung chương.";
-    const para = text.split(/\n\s*\n/).filter(p => p.trim() !== '');
-    return { chapterText: text, paragraphs: para };
-  }, [storyData, chapterNumber]);
+  const { chapterText, paragraphs, isTranslating } = useMemo(() => {
+    const isLive = typeof liveContent === 'string';
+    const text = isLive ? liveContent : storyData?.chapters?.[chapterNumber] || "Không tìm thấy nội dung chương.";
+    const para = text.split(/\n\s*\n/).filter(p => p.trim() !== '' || isLive);
+    if (isLive && para.length === 0) {
+      para.push("Đang dịch...");
+    }
+    return { chapterText: text, paragraphs: para, isTranslating: isLive };
+  }, [storyData, chapterNumber, liveContent]);
 
   const { chapterList, prevChapter, nextChapter } = useMemo(() => {
     if (!storyData) return { chapterList: [], prevChapter: null, nextChapter: null };
@@ -372,7 +383,7 @@ const ReaderPage: React.FC<{
 
   // Restore scroll position
   useEffect(() => {
-    if (contentRef.current && bookmark && bookmark.chapter === chapterNumber) {
+    if (contentRef.current && bookmark && bookmark.chapter === chapterNumber && !isTranslating) {
         const timer = setTimeout(() => {
             const contentElement = contentRef.current;
             if (contentElement) {
@@ -380,15 +391,23 @@ const ReaderPage: React.FC<{
             }
         }, 100);
         return () => clearTimeout(timer);
-    } else if (contentRef.current) {
+    } else if (contentRef.current && !isTranslating) {
         contentRef.current.scrollTop = 0;
     }
-  }, [storyName, chapterNumber, library]);
+  }, [storyName, chapterNumber, library, isTranslating]);
+  
+  // Auto-scroll to bottom during live translation
+  useEffect(() => {
+    if (isTranslating && contentRef.current) {
+        contentRef.current.scrollTop = contentRef.current.scrollHeight;
+    }
+  }, [paragraphs, isTranslating]);
 
-  // Save scroll position (debounced)
+  // Save scroll position (debounced) - disabled during translation
   useEffect(() => {
     const contentElement = contentRef.current;
     const handleScroll = () => {
+        if (isTranslating) return;
         if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
         scrollTimeoutRef.current = window.setTimeout(() => {
             if (contentElement) {
@@ -403,7 +422,7 @@ const ReaderPage: React.FC<{
         contentElement?.removeEventListener('scroll', handleScroll);
         if (scrollTimeoutRef.current) window.clearTimeout(scrollTimeoutRef.current);
     };
-  }, [storyName, chapterNumber, onSetBookmark]);
+  }, [storyName, chapterNumber, onSetBookmark, isTranslating]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -426,6 +445,7 @@ const ReaderPage: React.FC<{
   }
 
   const handleToggleBookmark = () => {
+    if (isTranslating) return;
     if (bookmark?.chapter === chapterNumber) {
         onRemoveBookmark(storyName);
     } else {
@@ -437,9 +457,11 @@ const ReaderPage: React.FC<{
   };
 
   const handleMouseEnterPara = (index: number) => {
+    if (isTranslating) return;
     setHoveredParagraph(index);
   };
   const handleMouseLeavePara = () => {
+    if (isTranslating) return;
     setHoveredParagraph(null);
   };
   
@@ -456,7 +478,7 @@ const ReaderPage: React.FC<{
     <div className="flex items-center justify-center gap-2 sm:gap-4 p-2 text-[var(--color-text-secondary)]">
         <button
             onClick={() => onChapterChange(storyName, prevChapter!)}
-            disabled={!prevChapter}
+            disabled={!prevChapter || isTranslating}
             className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-active)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-semibold"
             aria-label="Chương trước"
         >
@@ -466,7 +488,8 @@ const ReaderPage: React.FC<{
         <div className="relative" ref={chapterListRef}>
           <button
               onClick={() => setIsChapterListOpen(prev => !prev)}
-              className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-active)] transition-colors text-sm font-semibold"
+              disabled={isTranslating}
+              className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-active)] disabled:opacity-50 transition-colors text-sm font-semibold"
               aria-label="Danh sách chương"
           >
               <ListIcon className="w-5 h-5"/>
@@ -488,7 +511,7 @@ const ReaderPage: React.FC<{
         </div>
         <button
             onClick={() => onChapterChange(storyName, nextChapter!)}
-            disabled={!nextChapter}
+            disabled={!nextChapter || isTranslating}
             className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-lg bg-[var(--color-bg-tertiary)] hover:bg-[var(--color-bg-active)] disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm font-semibold"
             aria-label="Chương sau"
         >
@@ -509,13 +532,17 @@ const ReaderPage: React.FC<{
             <ArrowLeftIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
             <span className="hidden sm:inline text-md font-semibold text-[var(--color-text-secondary)]">Thư viện</span>
           </button>
-          <h2 className="text-lg sm:text-xl font-bold text-[var(--color-text-primary)] text-center truncate px-2" title={`${storyName} - Chương ${chapterNumber}`}>
-            {`${storyName} - Chương ${chapterNumber}`}
-          </h2>
+          <div className="text-center truncate px-2">
+            <h2 className="text-lg sm:text-xl font-bold text-[var(--color-text-primary)] truncate" title={`${storyName} - Chương ${chapterNumber}`}>
+                {`${storyName} - Chương ${chapterNumber}`}
+            </h2>
+            {isTranslating && <p className="text-sm text-[var(--color-accent-primary)] font-semibold animate-pulse">Đang biên dịch...</p>}
+          </div>
           <div className="flex items-center gap-1 sm:gap-2">
             <button
                 onClick={handleToggleBookmark}
-                className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
+                disabled={isTranslating}
+                className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors disabled:opacity-50"
                 aria-label={bookmark?.chapter === chapterNumber ? "Bỏ đánh dấu chương" : "Đánh dấu chương này"}
             >
                 {bookmark?.chapter === chapterNumber 
@@ -525,7 +552,8 @@ const ReaderPage: React.FC<{
             </button>
             <button
                 onClick={handleCopyToClipboard}
-                className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
+                disabled={isTranslating}
+                className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors disabled:opacity-50"
                 aria-label="Sao chép"
               >
                 {copySuccess ? <CheckIcon className="w-6 h-6 text-green-600" /> : <CopyIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />}
@@ -551,13 +579,15 @@ const ReaderPage: React.FC<{
                     <p key={index}
                       onMouseEnter={() => handleMouseEnterPara(index)}
                       onMouseLeave={handleMouseLeavePara}
-                      onClick={() => !isRead && onSetReadToIndex(storyName, chapterNumber, index + 1)}
+                      onClick={() => !isRead && !isTranslating && onSetReadToIndex(storyName, chapterNumber, index + 1)}
                       className={`transition-all duration-300 ${
-                        isRead 
+                        isRead && !isTranslating
                         ? 'opacity-40' 
-                        : 'opacity-100 cursor-pointer'
+                        : 'opacity-100'
                       } ${
-                        hoveredParagraph === index && !isRead ? 'underline decoration-from-font' : ''
+                        !isTranslating && 'cursor-pointer'
+                      } ${
+                        hoveredParagraph === index && !isRead && !isTranslating ? 'underline decoration-from-font' : ''
                       }`}
                       style={{ whiteSpace: 'pre-wrap', marginBottom: '1em', textUnderlineOffset: '4px' }}
                     >
@@ -610,6 +640,9 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'editor' | 'reader'>('editor');
   const [readerData, setReaderData] = useState<{ story: string; chapter: string } | null>(null);
   const [renameModalData, setRenameModalData] = useState<RenameModalData | null>(null);
+
+  const [liveTranslation, setLiveTranslation] = useState<LiveTranslation | null>(null);
+  const translationAbortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -780,35 +813,66 @@ const App: React.FC = () => {
     resetPanelsAfterSuccess();
   };
 
-  const handleTranslateSinglePanel = async (panelId: string): Promise<boolean> => {
+  const handleTranslateSinglePanel = async (panelId: string) => {
     const panel = panels.find(p => p.id === panelId);
-    if (!panel) return false;
-
+    if (!panel) return;
+  
+    // Cancel any ongoing translation
+    if (translationAbortControllerRef.current) {
+      translationAbortControllerRef.current.abort();
+    }
+    const controller = new AbortController();
+    translationAbortControllerRef.current = controller;
+  
     updatePanelState(panel.id, { isLoading: true, error: null });
+    
     const trimmedStoryName = panel.storyName.trim();
+    const trimmedChapterNumber = panel.chapterNumber.trim();
     saveLastStoryName(trimmedStoryName);
-
+  
+    // Immediately open reader and set live translation state
+    openReader(trimmedStoryName, trimmedChapterNumber);
+    setLiveTranslation({ story: trimmedStoryName, chapter: trimmedChapterNumber, content: '' });
+  
     try {
-        const result = await refineVietnameseText(panel.inputText);
-        const newLibrary = JSON.parse(JSON.stringify(library));
-        const trimmedChapterNumber = panel.chapterNumber.trim();
-        const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
-        
-        if (!newLibrary[trimmedStoryName]) {
-            newLibrary[trimmedStoryName] = { chapters: {}, lastModified: Date.now(), tags: [] };
-        }
-        newLibrary[trimmedStoryName].chapters[trimmedChapterNumber] = result;
-        newLibrary[trimmedStoryName].lastModified = Date.now();
-        newLibrary[trimmedStoryName].tags = storyTags;
-        
-        await saveLibrary(newLibrary);
-        updatePanelState(panel.id, { isLoading: false });
-        return true;
+      const onChunk = (chunk: string) => {
+        setLiveTranslation(prev => {
+          if (prev && !controller.signal.aborted) {
+            return { ...prev, content: prev.content + chunk };
+          }
+          return null;
+        });
+      };
+  
+      const finalText = await refineVietnameseText(panel.inputText, onChunk, controller.signal);
+      
+      // Save the final result
+      const newLibrary = JSON.parse(JSON.stringify(library));
+      const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+      
+      if (!newLibrary[trimmedStoryName]) {
+        newLibrary[trimmedStoryName] = { chapters: {}, lastModified: Date.now(), tags: [] };
+      }
+      newLibrary[trimmedStoryName].chapters[trimmedChapterNumber] = finalText;
+      newLibrary[trimmedStoryName].lastModified = Date.now();
+      newLibrary[trimmedStoryName].tags = storyTags;
+      
+      await saveLibrary(newLibrary);
+      updatePanelState(panel.id, { isLoading: false });
+  
     } catch (err) {
-        console.error(err);
+      console.error(err);
+      if (err instanceof Error && err.message.includes('Yêu cầu đã bị hủy')) {
+        // Don't show an error if user-initiated cancellation
+        updatePanelState(panel.id, { isLoading: false });
+      } else {
         const errorMessage = err instanceof Error ? err.message : 'Lỗi dịch chương này. Vui lòng thử lại.';
         updatePanelState(panel.id, { error: errorMessage, isLoading: false });
-        return false;
+      }
+    } finally {
+      // Cleanup
+      setLiveTranslation(null);
+      translationAbortControllerRef.current = null;
     }
   };
 
@@ -823,23 +887,22 @@ const App: React.FC = () => {
     const totalPanels = panels.length;
     for (let i = 0; i < totalPanels; i++) {
         const panel = panels[i];
-        setBatchProgress(`Đang xử lý chương ${i + 1}/${totalPanels}...`);
+        setBatchProgress(`Đang chuẩn bị dịch chương ${i + 1}/${totalPanels}...`);
         
-        const success = await handleTranslateSinglePanel(panel.id);
-        if (!success) {
+        await handleTranslateSinglePanel(panel.id);
+        
+        // Check for errors on the panel to stop the batch
+        const currentPanelState = panels.find(p => p.id === panel.id);
+        if (currentPanelState?.error) {
             setIsBatchProcessing(false);
             setBatchProgress(null);
-            alert('Quá trình dịch đã dừng lại do có lỗi. Vui lòng kiểm tra và thử lại.');
+            alert(`Quá trình dịch đã dừng lại do có lỗi ở chương ${panel.chapterNumber}. Vui lòng kiểm tra và thử lại.`);
             return;
-        }
-
-        if (i === 0) {
-          openReader(panel.storyName.trim(), panel.chapterNumber.trim());
         }
 
         if (i < totalPanels - 1) {
             const waitTime = 30000; // 30 seconds
-            setBatchProgress(`Đã dịch xong chương ${i + 1}/${totalPanels}. Chờ ${waitTime / 1000} giây...`);
+            setBatchProgress(`Chờ ${waitTime / 1000} giây trước khi dịch chương tiếp theo...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
     }
@@ -849,6 +912,11 @@ const App: React.FC = () => {
   };
 
   const exitReader = useCallback(() => {
+    if (translationAbortControllerRef.current) {
+        translationAbortControllerRef.current.abort();
+        translationAbortControllerRef.current = null;
+    }
+    setLiveTranslation(null);
     setCurrentView('editor');
     setReaderData(null);
   }, []);
@@ -931,6 +999,10 @@ const App: React.FC = () => {
         </div>
     );
   }
+  
+  const liveReaderContent = (currentView === 'reader' && readerData && liveTranslation && liveTranslation.story === readerData.story && liveTranslation.chapter === readerData.chapter)
+    ? liveTranslation.content
+    : undefined;
 
   return (
     <>
@@ -1046,6 +1118,7 @@ const App: React.FC = () => {
           storyName={readerData.story}
           chapterNumber={readerData.chapter}
           library={library}
+          liveContent={liveReaderContent}
           onChapterChange={openReader}
           onExit={exitReader}
           settings={settings}
