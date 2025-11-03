@@ -762,11 +762,6 @@ const App: React.FC = () => {
     );
   };
 
-  const openReader = useCallback((story: string, chapter: string) => {
-    setReaderData({ story, chapter });
-    setCurrentView('reader');
-  }, []);
-  
   const handleSetBookmark = useCallback(async (storyName: string, chapter: string, scrollPosition: number) => {
     const newLibrary = JSON.parse(JSON.stringify(library));
     if (newLibrary[storyName]) {
@@ -778,8 +773,17 @@ const App: React.FC = () => {
         }
         await saveLibrary(newLibrary);
     }
-  }, [library]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [library]);
 
+  const openReader = useCallback((story: string, chapter: string) => {
+    const currentBookmark = library[story]?.bookmark;
+    if (currentBookmark?.chapter !== chapter) {
+        handleSetBookmark(story, chapter, 0);
+    }
+    setReaderData({ story, chapter });
+    setCurrentView('reader');
+  }, [library, handleSetBookmark]);
+  
   const handleSetReadToIndex = useCallback(async (storyName: string, chapter: string, readToIndex: number) => {
     const newLibrary = JSON.parse(JSON.stringify(library));
     if (newLibrary[storyName]) {
