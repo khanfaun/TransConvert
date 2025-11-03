@@ -881,9 +881,12 @@ const App: React.FC = () => {
         return true;
     } catch (err) {
         console.error(err);
-        updatePanelState(panel.id, { isLoading: false });
-        // Show retry modal on failure
-        setRetryModalData({ panelId: panel.id });
+        const errorMessage = err instanceof Error ? err.message : "Đã xảy ra lỗi không xác định.";
+        updatePanelState(panel.id, { isLoading: false, error: errorMessage });
+        // Show retry modal on failure only for specific error
+        if (errorMessage.includes("API không trả về nội dung nào")) {
+            setRetryModalData({ panelId: panel.id });
+        }
         return false;
     }
   };
@@ -905,28 +908,62 @@ const App: React.FC = () => {
     setIsBatchProcessing(true);
     setBatchProgressPercent(0);
     const totalPanels = panels.length;
+    
+    // *** FIX: Create a single, cumulative copy of the library before the loop ***
+    let cumulativeLibrary = JSON.parse(JSON.stringify(library));
 
     for (let i = 0; i < totalPanels; i++) {
         const panel = panels[i];
         setBatchProgress(`Đang dịch chương ${panel.chapterNumber} (${i + 1}/${totalPanels})...`);
-        
-        const success = await handleTranslateSinglePanel(panel.id);
-        
-        if (!success) {
+        updatePanelState(panel.id, { isLoading: true, error: null });
+        const trimmedStoryName = panel.storyName.trim();
+        saveLastStoryName(trimmedStoryName);
+
+        try {
+            const result = await refineVietnameseText(panel.inputText);
+            if (!result || result.trim() === '') {
+                throw new Error("API không trả về nội dung nào.");
+            }
+
+            // *** FIX: Update the cumulative library object instead of creating a new one ***
+            const trimmedChapterNumber = panel.chapterNumber.trim();
+            const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+            
+            if (!cumulativeLibrary[trimmedStoryName]) {
+                cumulativeLibrary[trimmedStoryName] = { chapters: {}, lastModified: Date.now(), tags: [] };
+            }
+            cumulativeLibrary[trimmedStoryName].chapters[trimmedChapterNumber] = result;
+            cumulativeLibrary[trimmedStoryName].lastModified = Date.now();
+            cumulativeLibrary[trimmedStoryName].tags = storyTags;
+            
+            // Save the entire cumulative object. Each save contains the previous successful results.
+            await saveLibrary(cumulativeLibrary);
+            
+            updatePanelState(panel.id, { isLoading: false });
+            
+            const progress = Math.round(((i + 1) / totalPanels) * 100);
+            setBatchProgressPercent(progress);
+
+            if (i < totalPanels - 1) {
+                const waitTime = 30000; // 30 seconds
+                setBatchProgress(`Đã xong ${i + 1}/${totalPanels}. Chờ ${waitTime / 1000}s...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        } catch (err) {
+            console.error(err);
+            const errorMessage = err instanceof Error ? err.message : "Đã xảy ra lỗi không xác định.";
+            updatePanelState(panel.id, { isLoading: false, error: errorMessage });
+            
             setIsBatchProcessing(false);
             setBatchProgress(null);
             setBatchProgressPercent(0);
-            // Don't show alert, modal is already shown
+            
+            if (errorMessage.includes("API không trả về nội dung nào")) {
+                setRetryModalData({ panelId: panel.id });
+            } else {
+                alert(`Lỗi khi dịch chương ${panel.chapterNumber}: ${errorMessage}. Quá trình đã dừng lại.`);
+            }
             return;
-        }
-        
-        const progress = Math.round(((i + 1) / totalPanels) * 100);
-        setBatchProgressPercent(progress);
-
-        if (i < totalPanels - 1) {
-            const waitTime = 30000; // 30 seconds
-            setBatchProgress(`Đã xong ${i + 1}/${totalPanels}. Chờ ${waitTime / 1000}s...`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
         }
     }
 
@@ -1001,12 +1038,25 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isSettingsModalOpen, currentView, exitReader, renameModalData, retryModalData]);
 
-  const allTags = useMemo(() => Array.from(new Set(Object.values(library).flatMap(s => s.tags || []))).sort(), [library]);
+  // FIX: Explicitly type `story` when iterating to prevent potential 'unknown' type errors from Object.values.
+  const allTags = useMemo(() => {
+    const tagsSet = new Set<string>();
+    Object.values(library).forEach((story: StoryData) => {
+        story.tags?.forEach(tag => tagsSet.add(tag));
+    });
+    return Array.from(tagsSet).sort();
+  }, [library]);
 
+  // FIX: Cast library items to StoryData to ensure type-safe access to properties for filtering and sorting.
   const filteredLibraryKeys = useMemo(() => {
     const keys = Object.keys(library);
-    const filtered = activeTagFilter ? keys.filter(key => library[key]?.tags?.includes(activeTagFilter)) : keys;
-    return filtered.sort((a, b) => library[b].lastModified - library[a].lastModified);
+    const filtered = activeTagFilter
+      ? keys.filter(key => {
+          const storyData = library[key] as StoryData;
+          return storyData?.tags?.includes(activeTagFilter);
+        })
+      : keys;
+    return filtered.sort((a, b) => (library[b] as StoryData).lastModified - (library[a] as StoryData).lastModified);
   }, [library, activeTagFilter]);
 
   const isFormInvalid = panels.some(p => !p.storyName.trim() || !p.chapterNumber.trim() || !p.inputText.trim());
