@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "@google/genai";
 import { DEV_MODE_ENABLED } from './devConfig';
 
@@ -129,7 +128,7 @@ ${rawText}
       });
 
       const refinedText = response.text;
-      if (!refinedText) {
+      if (!refinedText || refinedText.trim() === '') {
           throw new Error("API không trả về nội dung nào.");
       }
 
@@ -142,6 +141,9 @@ ${rawText}
       if (i === apiKeys.length - 1) { // If this was the last key to try
         if (error instanceof Error && error.message.includes('API key not valid')) {
              throw new Error("Tất cả các API key cung cấp đều không hợp lệ hoặc đã hết hạn.");
+        }
+        if (error instanceof Error && error.message.includes('API không trả về nội dung nào')) {
+             throw error; // Propagate the specific empty content error
         }
         throw new Error("Không thể kết nối đến dịch vụ biên dịch sau khi đã thử với tất cả các API key.");
       }

@@ -36,6 +36,9 @@ interface RenameModalData {
   oldName: string;
   storyName?: string; // For chapter rename
 }
+interface RetryModalData {
+    panelId: string;
+}
 
 // ---- HELPER FUNCTIONS ---- //
 const createNewPanel = (): PanelState => ({
@@ -331,6 +334,53 @@ const RenameModal: React.FC<{
   );
 };
 
+const RetryModal: React.FC<{
+  data: RetryModalData | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}> = ({ data, onClose, onConfirm }) => {
+  if (!data) return null;
+
+  return (
+    <div
+      className="fixed inset-0 bg-[var(--color-backdrop)] backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in"
+      onClick={onClose}
+      aria-modal="true"
+      role="dialog"
+    >
+      <div
+        className="bg-[var(--color-bg-secondary)] rounded-2xl shadow-2xl shadow-[var(--shadow-color)] w-full max-w-md flex flex-col transform animate-fade-in-scale"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-center justify-between p-4 sm:p-5 border-b border-[var(--color-border-secondary)]">
+          <h2 className="text-xl font-bold text-red-600 flex items-center gap-2">
+            <AlertTriangleIcon className="w-6 h-6" />
+            Lỗi Biên Dịch
+          </h2>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-[var(--color-bg-active)]" aria-label="Đóng">
+            <CloseIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
+          </button>
+        </header>
+        <div className="p-6 space-y-4">
+            <p className="text-[var(--color-text-primary)]">
+                Quá trình biên dịch đã thất bại do không nhận được nội dung hợp lệ từ AI. Điều này có thể do lỗi tạm thời.
+            </p>
+            <p className="font-semibold text-[var(--color-text-secondary)]">
+                Bạn có muốn thử biên dịch lại chương này không?
+            </p>
+        </div>
+        <footer className="flex justify-end gap-3 p-4 bg-[var(--color-bg-tertiary)] rounded-b-2xl">
+            <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-active)]">Hủy</button>
+            <button type="button" onClick={onConfirm} className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] hover:bg-[var(--color-accent-hover)] flex items-center gap-2">
+                <RefreshIcon className="w-5 h-5" />
+                Thử lại
+            </button>
+        </footer>
+      </div>
+    </div>
+  );
+};
+
 
 // ---- READER PAGE COMPONENT ---- //
 const ReaderPage: React.FC<{
@@ -587,6 +637,15 @@ const SyncStatusIndicator: React.FC<{ status: SyncState }> = ({ status }) => {
   );
 };
 
+const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => (
+  <div className="absolute inset-0 w-full bg-transparent rounded-lg overflow-hidden">
+    <div
+      className="h-full bg-[var(--color-accent-primary)] opacity-30 transition-all duration-500 ease-out"
+      style={{ width: `${progress}%` }}
+    />
+  </div>
+);
+
 
 // ---- MAIN APP COMPONENT ---- //
 
@@ -595,6 +654,7 @@ const App: React.FC = () => {
   const [isBatchProcessing, setIsBatchProcessing] = useState<boolean>(false);
   const [isDirectSaving, setIsDirectSaving] = useState<boolean>(false);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const [batchProgressPercent, setBatchProgressPercent] = useState<number>(0);
 
   const [library, setLibrary] = useState<Library>({});
   const [isLibraryLoading, setIsLibraryLoading] = useState<boolean>(true);
@@ -610,6 +670,7 @@ const App: React.FC = () => {
   const [currentView, setCurrentView] = useState<'editor' | 'reader'>('editor');
   const [readerData, setReaderData] = useState<{ story: string; chapter: string } | null>(null);
   const [renameModalData, setRenameModalData] = useState<RenameModalData | null>(null);
+  const [retryModalData, setRetryModalData] = useState<RetryModalData | null>(null);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -773,7 +834,6 @@ const App: React.FC = () => {
         newLibrary[trimmedStoryName].chapters[panel.chapterNumber.trim()] = panel.inputText;
         newLibrary[trimmedStoryName].lastModified = Date.now();
         newLibrary[trimmedStoryName].tags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
-        if (i === 0) openReader(trimmedStoryName, panel.chapterNumber.trim());
     }
     await saveLibrary(newLibrary);
     setIsDirectSaving(false);
@@ -787,9 +847,17 @@ const App: React.FC = () => {
     updatePanelState(panel.id, { isLoading: true, error: null });
     const trimmedStoryName = panel.storyName.trim();
     saveLastStoryName(trimmedStoryName);
+    
+    // Save content to localStorage before translation
+    localStorage.setItem(`pending_translation_${panel.id}`, panel.inputText);
 
     try {
         const result = await refineVietnameseText(panel.inputText);
+        
+        if (!result || result.trim() === '') {
+            throw new Error("API không trả về nội dung nào.");
+        }
+
         const newLibrary = JSON.parse(JSON.stringify(library));
         const trimmedChapterNumber = panel.chapterNumber.trim();
         const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
@@ -803,13 +871,24 @@ const App: React.FC = () => {
         
         await saveLibrary(newLibrary);
         updatePanelState(panel.id, { isLoading: false });
+        
+        // Clear saved content on success
+        localStorage.removeItem(`pending_translation_${panel.id}`);
         return true;
     } catch (err) {
         console.error(err);
-        const errorMessage = err instanceof Error ? err.message : 'Lỗi dịch chương này. Vui lòng thử lại.';
-        updatePanelState(panel.id, { error: errorMessage, isLoading: false });
+        updatePanelState(panel.id, { isLoading: false });
+        // Show retry modal on failure
+        setRetryModalData({ panelId: panel.id });
         return false;
     }
+  };
+  
+  const handleRetryTranslation = async () => {
+    if (!retryModalData) return;
+    const { panelId } = retryModalData;
+    setRetryModalData(null); // Close modal
+    await handleTranslateSinglePanel(panelId); // Retry
   };
 
   const startBatchTranslation = async () => {
@@ -820,31 +899,36 @@ const App: React.FC = () => {
         }
     }
     setIsBatchProcessing(true);
+    setBatchProgressPercent(0);
     const totalPanels = panels.length;
+
     for (let i = 0; i < totalPanels; i++) {
         const panel = panels[i];
-        setBatchProgress(`Đang xử lý chương ${i + 1}/${totalPanels}...`);
+        setBatchProgress(`Đang dịch chương ${panel.chapterNumber} (${i + 1}/${totalPanels})...`);
         
         const success = await handleTranslateSinglePanel(panel.id);
+        
         if (!success) {
             setIsBatchProcessing(false);
             setBatchProgress(null);
-            alert('Quá trình dịch đã dừng lại do có lỗi. Vui lòng kiểm tra và thử lại.');
+            setBatchProgressPercent(0);
+            // Don't show alert, modal is already shown
             return;
         }
-
-        if (i === 0) {
-          openReader(panel.storyName.trim(), panel.chapterNumber.trim());
-        }
+        
+        const progress = Math.round(((i + 1) / totalPanels) * 100);
+        setBatchProgressPercent(progress);
 
         if (i < totalPanels - 1) {
             const waitTime = 30000; // 30 seconds
-            setBatchProgress(`Đã dịch xong chương ${i + 1}/${totalPanels}. Chờ ${waitTime / 1000} giây...`);
+            setBatchProgress(`Đã xong ${i + 1}/${totalPanels}. Chờ ${waitTime / 1000}s...`);
             await new Promise(resolve => setTimeout(resolve, waitTime));
         }
     }
+
     setIsBatchProcessing(false);
     setBatchProgress(null);
+    setBatchProgressPercent(0);
     resetPanelsAfterSuccess();
   };
 
@@ -858,6 +942,7 @@ const App: React.FC = () => {
   const renameChapter = (storyName: string, oldChapterNumber: string) => setRenameModalData({ type: 'chapter', oldName: oldChapterNumber, storyName: storyName });
   
   const deleteStory = async (storyName: string) => {
+    if (!window.confirm(`Bạn có chắc chắn muốn xoá toàn bộ truyện "${storyName}" không? Hành động này không thể hoàn tác.`)) return;
     const newLibrary = { ...library };
     delete newLibrary[storyName];
     await saveLibrary(newLibrary);
@@ -865,6 +950,7 @@ const App: React.FC = () => {
   };
   
   const deleteChapter = async (storyName: string, chapterNumber: string) => {
+      if (!window.confirm(`Bạn có chắc chắn muốn xoá chương ${chapterNumber} của truyện "${storyName}" không?`)) return;
       const newLibrary = JSON.parse(JSON.stringify(library));
       if (newLibrary[storyName]?.chapters) {
           delete newLibrary[storyName].chapters[chapterNumber];
@@ -901,14 +987,15 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (renameModalData) setRenameModalData(null);
+        if (retryModalData) setRetryModalData(null);
+        else if (renameModalData) setRenameModalData(null);
         else if (isSettingsModalOpen) setIsSettingsModalOpen(false);
         else if (currentView === 'reader') exitReader();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSettingsModalOpen, currentView, exitReader, renameModalData]);
+  }, [isSettingsModalOpen, currentView, exitReader, renameModalData, retryModalData]);
 
   const allTags = useMemo(() => Array.from(new Set(Object.values(library).flatMap(s => s.tags || []))).sort(), [library]);
 
@@ -983,10 +1070,16 @@ const App: React.FC = () => {
                       <button
                       onClick={startBatchTranslation}
                       disabled={isFormInvalid || isAnyProcessRunning}
-                      className="inline-flex items-center justify-center bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:ring-offset-2 focus:ring-offset-[var(--color-bg-secondary)] transition-all duration-200 disabled:bg-[var(--color-accent-disabled)] disabled:cursor-not-allowed disabled:shadow-none w-full sm:w-auto"
+                      className="relative inline-flex items-center justify-center bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:ring-offset-2 focus:ring-offset-[var(--color-bg-secondary)] transition-all duration-200 disabled:bg-[var(--color-accent-disabled)] disabled:cursor-not-allowed disabled:shadow-none w-full sm:w-auto overflow-hidden"
                       >
                       {isBatchProcessing ? (
-                          <><SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5 text-[var(--color-text-accent)]" />{batchProgress || 'Đang xử lý...'}</>
+                          <>
+                            <ProgressBar progress={batchProgressPercent} />
+                            <div className="relative z-10 flex items-center">
+                                <SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5 text-[var(--color-text-accent)]" />
+                                <span>{batchProgress || 'Đang xử lý...'}</span>
+                            </div>
+                          </>
                       ) : ( 'Biên Dịch và Lưu Toàn Bộ' )}
                       </button>
                   </div>
@@ -1056,6 +1149,7 @@ const App: React.FC = () => {
         />
       )}
       <RenameModal data={renameModalData} onClose={() => setRenameModalData(null)} onConfirm={handleConfirmRename} library={library} />
+      <RetryModal data={retryModalData} onClose={() => setRetryModalData(null)} onConfirm={handleRetryTranslation} />
       <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} settings={settings} onSettingsChange={handleSettingsChange} />
       <SyncStatusIndicator status={syncState} />
     </>
