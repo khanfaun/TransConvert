@@ -657,13 +657,13 @@ const ReaderPage: React.FC<{
                     <p key={index}
                       onMouseEnter={() => handleMouseEnterPara(index)}
                       onMouseLeave={handleMouseLeavePara}
-                      onClick={() => !isRead && onSetReadToIndex(storyName, chapterNumber, index + 1)}
-                      className={`transition-all duration-300 ${
+                      onClick={() => onSetReadToIndex(storyName, chapterNumber, index + 1)}
+                      className={`transition-all duration-300 cursor-pointer ${
                         isRead 
                         ? 'opacity-40' 
-                        : 'opacity-100 cursor-pointer'
+                        : 'opacity-100'
                       } ${
-                        hoveredParagraph === index && !isRead ? 'underline decoration-from-font' : ''
+                        hoveredParagraph === index ? 'underline decoration-from-font' : ''
                       }`}
                       style={{ whiteSpace: 'pre-wrap', marginBottom: '1em', textUnderlineOffset: '4px' }}
                     >
