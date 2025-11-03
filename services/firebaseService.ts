@@ -1,6 +1,7 @@
 import { initializeApp } from 'firebase/app';
 import { getDatabase, ref, set, get, child, onValue, off, DatabaseReference } from "firebase/database";
-import type { Library } from './storageService';
+// FIX: The `Library` type is exported from `types.ts`, not `storageService.ts`.
+import type { Library } from '../types';
 
 const firebaseConfig = {
   apiKey: "AIzaSyDh1jnrEZlQy1Y3Z6Hfrs7q23WH_e484cc",

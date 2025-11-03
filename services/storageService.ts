@@ -1,30 +1,7 @@
 import { DEV_MODE_ENABLED } from './devConfig';
 import { DEMO_LIBRARY } from './demoData';
+import type { Library, AppSettings } from '../types';
 
-// Định nghĩa kiểu dữ liệu cho thư viện
-interface ChapterData {
-    [chapter: string]: string;
-}
-export interface StoryData {
-    chapters: ChapterData;
-    lastModified: number;
-    tags?: string[];
-    bookmark?: {
-        chapter: string;
-        scrollPosition: number;
-        readToIndex?: number; // Index of the paragraph read up to
-    };
-}
-export interface Library {
-    [storyName: string]: StoryData;
-}
-
-// Định nghĩa kiểu dữ liệu cho cài đặt
-export interface AppSettings {
-    theme: 'light' | 'dark' | 'night';
-    font: 'sans' | 'serif' | 'mono';
-    fontSize: 'sm' | 'base' | 'lg';
-}
 
 const LAST_STORY_NAME_KEY = 'ai_story_translator_last_story';
 const SETTINGS_KEY = 'ai_story_translator_settings';
@@ -67,20 +44,39 @@ export const loadLastStoryName = (): string => {
  * @returns {AppSettings} Đối tượng cài đặt hoặc giá trị mặc định.
  */
 export const loadSettings = (): AppSettings => {
+    const defaultSettings: AppSettings = {
+        theme: 'dark',
+        font: 'sans',
+        fontSize: 18
+    };
+
     try {
         const serializedSettings = localStorage.getItem(SETTINGS_KEY);
         if (serializedSettings) {
-            return JSON.parse(serializedSettings);
+            const settings = JSON.parse(serializedSettings);
+            
+            // Migration for old string-based fontSize
+            if (typeof settings.fontSize !== 'number') {
+                switch (settings.fontSize) {
+                    case 'sm':
+                        settings.fontSize = 16;
+                        break;
+                    case 'lg':
+                        settings.fontSize = 20;
+                        break;
+                    case 'base':
+                    default:
+                        settings.fontSize = 18;
+                        break;
+                }
+            }
+            return { ...defaultSettings, ...settings };
         }
     } catch (error) {
         console.error("Lỗi khi tải cài đặt từ localStorage:", error);
     }
-    // Return default settings
-    return {
-        theme: 'dark',
-        font: 'sans',
-        fontSize: 'base'
-    };
+    
+    return defaultSettings;
 };
 
 /**
