@@ -39,6 +39,11 @@ interface RenameModalData {
 interface RetryModalData {
     panelId: string;
 }
+interface DeleteModalData {
+  type: 'story' | 'chapter';
+  storyName: string;
+  chapterNumber?: string;
+}
 
 // ---- HELPER FUNCTIONS ---- //
 const createNewPanel = (): PanelState => ({
@@ -381,6 +386,57 @@ const RetryModal: React.FC<{
   );
 };
 
+const ConfirmationModal: React.FC<{
+  data: DeleteModalData | null;
+  onClose: () => void;
+  onConfirm: () => void;
+}> = ({ data, onClose, onConfirm }) => {
+  if (!data) return null;
+
+  const title = data.type === 'story' ? 'Xoá truyện' : 'Xoá chương';
+  const message = data.type === 'story' 
+    ? `Bạn có chắc chắn muốn xoá vĩnh viễn truyện "${data.storyName}" và toàn bộ các chương trong đó không? Hành động này không thể hoàn tác.`
+    : `Bạn có chắc chắn muốn xoá vĩnh viễn chương ${data.chapterNumber} của truyện "${data.storyName}" không?`;
+
+  return (
+    <div
+      className="fixed inset-0 bg-[var(--color-backdrop)] backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-fade-in"
+      onClick={onClose}
+      aria-modal="true"
+      role="dialog"
+    >
+      <div
+        className="bg-[var(--color-bg-secondary)] rounded-2xl shadow-2xl shadow-[var(--shadow-color)] w-full max-w-md flex flex-col transform animate-fade-in-scale"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-center justify-between p-4 sm:p-5 border-b border-[var(--color-border-secondary)]">
+          <h2 className="text-xl font-bold text-red-600 flex items-center gap-2">
+            <AlertTriangleIcon className="w-6 h-6" />
+            {title}
+          </h2>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-[var(--color-bg-active)]" aria-label="Đóng">
+            <CloseIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
+          </button>
+        </header>
+        <div className="p-6">
+          <p className="text-[var(--color-text-primary)]">{message}</p>
+        </div>
+        <footer className="flex justify-end gap-3 p-4 bg-[var(--color-bg-tertiary)] rounded-b-2xl">
+          <button type="button" onClick={onClose} className="px-4 py-2 rounded-lg text-sm font-semibold bg-[var(--color-bg-secondary)] hover:bg-[var(--color-bg-active)]">Hủy</button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            className="px-4 py-2 rounded-lg text-sm font-semibold bg-red-600 text-white hover:bg-red-700 flex items-center gap-2"
+          >
+            <TrashIcon className="w-5 h-5" />
+            Xác nhận Xoá
+          </button>
+        </footer>
+      </div>
+    </div>
+  );
+};
+
 
 // ---- READER PAGE COMPONENT ---- //
 const ReaderPage: React.FC<{
@@ -671,6 +727,7 @@ const App: React.FC = () => {
   const [readerData, setReaderData] = useState<{ story: string; chapter: string } | null>(null);
   const [renameModalData, setRenameModalData] = useState<RenameModalData | null>(null);
   const [retryModalData, setRetryModalData] = useState<RetryModalData | null>(null);
+  const [deleteModalData, setDeleteModalData] = useState<DeleteModalData | null>(null);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -983,7 +1040,6 @@ const App: React.FC = () => {
   const renameChapter = (storyName: string, oldChapterNumber: string) => setRenameModalData({ type: 'chapter', oldName: oldChapterNumber, storyName: storyName });
   
   const deleteStory = async (storyName: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xoá toàn bộ truyện "${storyName}" không? Hành động này không thể hoàn tác.`)) return;
     const newLibrary = { ...library };
     delete newLibrary[storyName];
     await saveLibrary(newLibrary);
@@ -991,13 +1047,24 @@ const App: React.FC = () => {
   };
   
   const deleteChapter = async (storyName: string, chapterNumber: string) => {
-      if (!window.confirm(`Bạn có chắc chắn muốn xoá chương ${chapterNumber} của truyện "${storyName}" không?`)) return;
       const newLibrary = JSON.parse(JSON.stringify(library));
       if (newLibrary[storyName]?.chapters) {
           delete newLibrary[storyName].chapters[chapterNumber];
           if (newLibrary[storyName].bookmark?.chapter === chapterNumber) delete newLibrary[storyName].bookmark;
           await saveLibrary(newLibrary);
       }
+  };
+  
+  const handleConfirmDelete = () => {
+    if (!deleteModalData) return;
+    
+    if (deleteModalData.type === 'story') {
+        deleteStory(deleteModalData.storyName);
+    } else if (deleteModalData.type === 'chapter' && deleteModalData.chapterNumber) {
+        deleteChapter(deleteModalData.storyName, deleteModalData.chapterNumber);
+    }
+    
+    setDeleteModalData(null);
   };
 
   const handleConfirmRename = async (newName: string) => {
@@ -1028,7 +1095,8 @@ const App: React.FC = () => {
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
-        if (retryModalData) setRetryModalData(null);
+        if (deleteModalData) setDeleteModalData(null);
+        else if (retryModalData) setRetryModalData(null);
         else if (renameModalData) setRenameModalData(null);
         else if (isSettingsModalOpen) setIsSettingsModalOpen(false);
         else if (currentView === 'reader') exitReader();
@@ -1036,7 +1104,7 @@ const App: React.FC = () => {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSettingsModalOpen, currentView, exitReader, renameModalData, retryModalData]);
+  }, [isSettingsModalOpen, currentView, exitReader, renameModalData, retryModalData, deleteModalData]);
 
   // FIX: Explicitly type `story` when iterating to prevent potential 'unknown' type errors from Object.values.
   const allTags = useMemo(() => {
@@ -1169,13 +1237,13 @@ const App: React.FC = () => {
                             </button>
                             <div className="flex items-center ml-2 flex-shrink-0">
                                 <button onClick={(e) => { e.stopPropagation(); renameStory(story); }} className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label={`Sửa tên truyện ${story}`}><EditIcon className="w-5 h-5 text-[var(--color-text-muted)] hover:text-[var(--color-accent-primary)]" /></button>
-                                <button onClick={(e) => { e.stopPropagation(); deleteStory(story); }} className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label={`Xoá truyện ${story}`}><TrashIcon className="w-5 h-5 text-[var(--color-text-muted)] hover:text-red-500" /></button>
+                                <button onClick={(e) => { e.stopPropagation(); setDeleteModalData({ type: 'story', storyName: story }); }} className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label={`Xoá truyện ${story}`}><TrashIcon className="w-5 h-5 text-[var(--color-text-muted)] hover:text-red-500" /></button>
                             </div>
                         </div>
                       {activeStory === story && (
                         <div className="p-3 border-t border-[var(--color-border-secondary)] bg-[var(--color-bg-hover)]">
                             {library[story].bookmark && (<button onClick={() => openReader(story, library[story].bookmark!.chapter)} className="w-full flex items-center gap-3 text-left p-2 mb-2 rounded-md bg-[var(--color-accent-subtle-bg)] text-[var(--color-accent-subtle-text)] hover:bg-opacity-80 transition-all font-semibold"><BookmarkSolidIcon className="w-5 h-5 flex-shrink-0"/><span>Tiếp tục đọc: Chương {library[story].bookmark!.chapter}</span></button>)}
-                            <div className="space-y-1">{library[story].chapters && Object.keys(library[story].chapters).sort((a, b) => parseFloat(a) - parseFloat(b)).map(chapter => (<div key={chapter} className="flex justify-between items-center group rounded-md hover:bg-[var(--color-bg-active)]"><button onClick={() => openReader(story, chapter)} className="flex-grow flex items-center gap-2 text-left p-2 text-[var(--color-text-secondary)]">{library[story].bookmark?.chapter === chapter ? <BookmarkSolidIcon className="w-4 h-4 text-[var(--color-accent-primary)] flex-shrink-0"/> : <div className="w-4 h-4 flex-shrink-0" />}<span>Chương {chapter}</span></button><div className="flex items-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={(e) => { e.stopPropagation(); renameChapter(story, chapter); }} className="p-2 rounded-full" aria-label={`Sửa chương ${chapter}`}><EditIcon className="w-4 h-4 text-[var(--color-text-muted)] hover:text-[var(--color-accent-primary)]" /></button><button onClick={(e) => { e.stopPropagation(); deleteChapter(story, chapter); }} className="p-2 rounded-full" aria-label={`Xoá chương ${chapter}`}><TrashIcon className="w-4 h-4 text-[var(--color-text-muted)] hover:text-red-500" /></button></div></div>))}</div>
+                            <div className="space-y-1">{library[story].chapters && Object.keys(library[story].chapters).sort((a, b) => parseFloat(a) - parseFloat(b)).map(chapter => (<div key={chapter} className="flex justify-between items-center group rounded-md hover:bg-[var(--color-bg-active)]"><button onClick={() => openReader(story, chapter)} className="flex-grow flex items-center gap-2 text-left p-2 text-[var(--color-text-secondary)]">{library[story].bookmark?.chapter === chapter ? <BookmarkSolidIcon className="w-4 h-4 text-[var(--color-accent-primary)] flex-shrink-0"/> : <div className="w-4 h-4 flex-shrink-0" />}<span>Chương {chapter}</span></button><div className="flex items-center flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"><button onClick={(e) => { e.stopPropagation(); renameChapter(story, chapter); }} className="p-2 rounded-full" aria-label={`Sửa chương ${chapter}`}><EditIcon className="w-4 h-4 text-[var(--color-text-muted)] hover:text-[var(--color-accent-primary)]" /></button><button onClick={(e) => { e.stopPropagation(); setDeleteModalData({ type: 'chapter', storyName: story, chapterNumber: chapter }); }} className="p-2 rounded-full" aria-label={`Xoá chương ${chapter}`}><TrashIcon className="w-4 h-4 text-[var(--color-text-muted)] hover:text-red-500" /></button></div></div>))}</div>
                         </div>
                       )}
                     </div>
@@ -1204,6 +1272,7 @@ const App: React.FC = () => {
       )}
       <RenameModal data={renameModalData} onClose={() => setRenameModalData(null)} onConfirm={handleConfirmRename} library={library} />
       <RetryModal data={retryModalData} onClose={() => setRetryModalData(null)} onConfirm={handleRetryTranslation} />
+      <ConfirmationModal data={deleteModalData} onClose={() => setDeleteModalData(null)} onConfirm={handleConfirmDelete} />
       <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} settings={settings} onSettingsChange={handleSettingsChange} />
       <SyncStatusIndicator status={syncState} />
     </>
