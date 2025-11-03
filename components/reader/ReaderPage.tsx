@@ -178,7 +178,7 @@ export const ReaderPage: React.FC<{
     }
     if (!contentElement || autoScrollSpeed === 0) return;
 
-    const scrollStep = 0.5 + autoScrollSpeed * 0.5;
+    const scrollStep = 0.25 + autoScrollSpeed * 0.25;
     const scroll = () => {
         const { scrollTop, scrollHeight, clientHeight } = contentElement;
         if (scrollTop + clientHeight >= scrollHeight - 1) {
