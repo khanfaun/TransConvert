@@ -1,5 +1,6 @@
 
 import { GoogleGenAI } from "@google/genai";
+import { DEV_MODE_ENABLED } from './devConfig';
 
 // State variables
 let apiKeys: string[] = [];
@@ -11,6 +12,12 @@ let initializationPromise: Promise<void> | null = null;
  * This logic runs only once.
  */
 const initializeApiKeys = async (): Promise<void> => {
+  // If dev mode is on, we don't need to initialize any keys.
+  if (DEV_MODE_ENABLED) {
+    console.warn("DEV MODE: API key initialization is skipped.");
+    return;
+  }
+  
   try {
     let keysFromServer: string[] | undefined;
 
@@ -68,6 +75,15 @@ const ensureInitialized = (): Promise<void> => {
  * @returns Văn bản đã được tối ưu hóa.
  */
 export const refineVietnameseText = async (rawText: string): Promise<string> => {
+  if (DEV_MODE_ENABLED) {
+    console.warn("DEV MODE: `refineVietnameseText` is returning mock data.");
+    return new Promise(resolve => {
+      setTimeout(() => {
+        resolve(`[CHẾ ĐỘ DEV ĐÃ BẬT]\nNội dung sau đây là giả lập, không được dịch bởi AI.\n\n--- BẮT ĐẦU NỘI DUNG GỐC ---\n${rawText}\n--- KẾT THÚC NỘI DUNG GỐC ---`);
+      }, 800); // Giả lập độ trễ mạng
+    });
+  }
+
   try {
     await ensureInitialized();
   } catch (error) {

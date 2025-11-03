@@ -1,14 +1,20 @@
+import { DEV_MODE_ENABLED } from './devConfig';
+import { DEMO_LIBRARY } from './demoData';
 
 // Định nghĩa kiểu dữ liệu cho thư viện
 interface ChapterData {
     [chapter: string]: string;
 }
-interface StoryData {
+export interface StoryData {
     chapters: ChapterData;
     lastModified: number;
     tags?: string[];
+    bookmark?: {
+        chapter: string;
+        scrollPosition: number;
+    };
 }
-interface Library {
+export interface Library {
     [storyName: string]: StoryData;
 }
 
@@ -19,58 +25,18 @@ export interface AppSettings {
     fontSize: 'sm' | 'base' | 'lg';
 }
 
-const LIBRARY_KEY = 'ai_story_translator_library';
 const LAST_STORY_NAME_KEY = 'ai_story_translator_last_story';
 const SETTINGS_KEY = 'ai_story_translator_settings';
 
-/**
- * Tải thư viện từ localStorage.
- * @returns {Library} Đối tượng thư viện hoặc đối tượng rỗng nếu không có.
- */
-export const loadLibrary = (): Library => {
-    try {
-        const serializedLibrary = localStorage.getItem(LIBRARY_KEY);
-        if (serializedLibrary === null) {
-            return {};
-        }
-        const library = JSON.parse(serializedLibrary);
-        // Data migration for older versions to prevent crashes
-        for (const story in library) {
-            if (Object.prototype.hasOwnProperty.call(library, story)) {
-                const storyData = library[story];
-                if (!storyData.tags) {
-                    storyData.tags = [];
-                }
-                if (!storyData.chapters) {
-                    storyData.chapters = {};
-                }
-            }
-        }
-        return library;
-    } catch (error) {
-        console.error("Lỗi khi tải thư viện từ localStorage:", error);
-        return {};
-    }
-};
-
-/**
- * Lưu thư viện vào localStorage.
- * @param {Library} library Đối tượng thư viện cần lưu.
- */
-export const saveLibrary = (library: Library): void => {
-    try {
-        const serializedLibrary = JSON.stringify(library);
-        localStorage.setItem(LIBRARY_KEY, serializedLibrary);
-    } catch (error) {
-        console.error("Lỗi khi lưu thư viện vào localStorage:", error);
-    }
-};
 
 /**
  * Lưu tên truyện được sử dụng gần nhất.
  * @param {string} name Tên truyện.
  */
 export const saveLastStoryName = (name: string): void => {
+    if (DEV_MODE_ENABLED) {
+        return; // Không lưu trong dev mode
+    }
     try {
         localStorage.setItem(LAST_STORY_NAME_KEY, name);
     } catch (error) {
@@ -83,9 +49,13 @@ export const saveLastStoryName = (name: string): void => {
  * @returns {string} Tên truyện hoặc chuỗi rỗng.
  */
 export const loadLastStoryName = (): string => {
+    if (DEV_MODE_ENABLED) {
+        return Object.keys(DEMO_LIBRARY)[0] || ''; // Trả về tên truyện đầu tiên trong demo data
+    }
     try {
         return localStorage.getItem(LAST_STORY_NAME_KEY) || '';
     } catch (error) {
+        // FIX: Added missing curly braces for the catch block.
         console.error("Lỗi khi tải tên truyện gần nhất:", error);
         return '';
     }

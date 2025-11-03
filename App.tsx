@@ -1,8 +1,8 @@
-
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { refineVietnameseText } from './services/geminiService';
-import { SpinnerIcon, CopyIcon, CheckIcon, CloseIcon, BookOpenIcon, ChevronDownIcon, PlusIcon, TagIcon, SettingsIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowLeftIcon, TrashIcon } from './components/Icons';
-import { loadLibrary, saveLibrary, loadLastStoryName, saveLastStoryName, loadSettings, saveSettings, AppSettings } from './services/storageService';
+import { SpinnerIcon, CopyIcon, CheckIcon, CloseIcon, BookOpenIcon, ChevronDownIcon, PlusIcon, TagIcon, SettingsIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowLeftIcon, TrashIcon, BookmarkIcon, BookmarkSolidIcon, SaveIcon, CloudIcon, CloudCheckIcon, AlertTriangleIcon } from './components/Icons';
+import { loadLastStoryName, saveLastStoryName, loadSettings, saveSettings, AppSettings } from './services/storageService';
+import { listenToLibraryChanges, saveLibraryToFirebase } from './services/firebaseService';
 
 // ---- INTERFACES ---- //
 interface PanelState {
@@ -21,10 +21,16 @@ interface StoryData {
   chapters: ChapterData;
   lastModified: number;
   tags?: string[];
+  bookmark?: {
+    chapter: string;
+    scrollPosition: number; // 0 to 1, representing percentage
+  };
 }
 interface Library {
   [storyName: string]: StoryData;
 }
+type SyncState = 'idle' | 'syncing' | 'synced' | 'error';
+
 
 // ---- HELPER FUNCTIONS ---- //
 const createNewPanel = (): PanelState => ({
@@ -228,11 +234,14 @@ const ReaderPage: React.FC<{
   onChapterChange: (story: string, chapter: string) => void;
   onExit: () => void;
   settings: AppSettings;
-}> = ({ storyName, chapterNumber, library, onChapterChange, onExit, settings }) => {
+  onSetBookmark: (story: string, chapter: string, scrollPosition: number) => void;
+  onRemoveBookmark: (story: string) => void;
+}> = ({ storyName, chapterNumber, library, onChapterChange, onExit, settings, onSetBookmark, onRemoveBookmark }) => {
   const [copySuccess, setCopySuccess] = useState(false);
   const [isChapterListOpen, setIsChapterListOpen] = useState(false);
   const chapterListRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
+  const scrollTimeoutRef = useRef<number | null>(null);
 
   const chapterText = library[storyName]?.chapters?.[chapterNumber] || "Không tìm thấy nội dung chương.";
 
@@ -248,10 +257,51 @@ const ReaderPage: React.FC<{
     return { chapterList: chapters, prevChapter: prev, nextChapter: next };
   }, [storyName, chapterNumber, library]);
 
+  // Restore scroll position
   useEffect(() => {
-    // Scroll to top when chapter changes
-    contentRef.current?.scrollTo(0, 0);
-  }, [chapterNumber, storyName]);
+    const storyData = library[storyName];
+    const bookmark = storyData?.bookmark;
+    if (contentRef.current && bookmark && bookmark.chapter === chapterNumber) {
+        const timer = setTimeout(() => {
+            const contentElement = contentRef.current;
+            if (contentElement) {
+                contentElement.scrollTop = bookmark.scrollPosition * (contentElement.scrollHeight - contentElement.clientHeight);
+            }
+        }, 100);
+        return () => clearTimeout(timer);
+    } else if (contentRef.current) {
+        contentRef.current.scrollTop = 0;
+    }
+  }, [storyName, chapterNumber, library]);
+
+  // Save scroll position (debounced)
+  useEffect(() => {
+    const contentElement = contentRef.current;
+    const handleScroll = () => {
+        if (scrollTimeoutRef.current) {
+            window.clearTimeout(scrollTimeoutRef.current);
+        }
+        scrollTimeoutRef.current = window.setTimeout(() => {
+            if (contentElement) {
+                const { scrollTop, scrollHeight, clientHeight } = contentElement;
+                if (scrollHeight > clientHeight) {
+                    const scrollPercentage = scrollTop / (scrollHeight - clientHeight);
+                    onSetBookmark(storyName, chapterNumber, Math.min(1, Math.max(0, scrollPercentage)));
+                } else {
+                    onSetBookmark(storyName, chapterNumber, 0);
+                }
+            }
+        }, 500);
+    };
+
+    contentElement?.addEventListener('scroll', handleScroll, { passive: true });
+    return () => {
+        contentElement?.removeEventListener('scroll', handleScroll);
+        if (scrollTimeoutRef.current) {
+            window.clearTimeout(scrollTimeoutRef.current);
+        }
+    };
+  }, [storyName, chapterNumber, onSetBookmark]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -265,7 +315,7 @@ const ReaderPage: React.FC<{
     return () => {
         document.removeEventListener('mousedown', handleClickOutside);
     };
-}, [isChapterListOpen]);
+  }, [isChapterListOpen]);
 
   const handleCopyToClipboard = useCallback(() => {
     navigator.clipboard.writeText(chapterText).then(() => {
@@ -278,6 +328,24 @@ const ReaderPage: React.FC<{
     onChapterChange(storyName, chapter);
     setIsChapterListOpen(false);
   }
+
+  const handleToggleBookmark = () => {
+    const isBookmarked = library[storyName]?.bookmark?.chapter === chapterNumber;
+    if (isBookmarked) {
+        onRemoveBookmark(storyName);
+    } else {
+        const contentElement = contentRef.current;
+        if (contentElement) {
+            const { scrollTop, scrollHeight, clientHeight } = contentElement;
+            const scrollPercentage = scrollHeight > clientHeight ? scrollTop / (scrollHeight - clientHeight) : 0;
+            onSetBookmark(storyName, chapterNumber, Math.min(1, Math.max(0, scrollPercentage)));
+        } else {
+            onSetBookmark(storyName, chapterNumber, 0); // Fallback to top if ref is not available
+        }
+    }
+  };
+
+  const isBookmarked = library[storyName]?.bookmark?.chapter === chapterNumber;
 
   const readerStyle = useMemo(() => {
     const style: React.CSSProperties = {};
@@ -348,13 +416,25 @@ const ReaderPage: React.FC<{
           <h2 className="text-lg sm:text-xl font-bold text-[var(--color-text-primary)] text-center truncate px-2" title={`${storyName} - Chương ${chapterNumber}`}>
             {`${storyName} - Chương ${chapterNumber}`}
           </h2>
-          <button
-              onClick={handleCopyToClipboard}
-              className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
-              aria-label="Sao chép"
+          <div className="flex items-center gap-2">
+            <button
+                onClick={handleToggleBookmark}
+                className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
+                aria-label={isBookmarked ? "Bỏ đánh dấu chương" : "Đánh dấu chương này"}
             >
-              {copySuccess ? <CheckIcon className="w-6 h-6 text-green-600" /> : <CopyIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />}
-          </button>
+                {isBookmarked 
+                    ? <BookmarkSolidIcon className="w-6 h-6 text-[var(--color-accent-primary)]" /> 
+                    : <BookmarkIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
+                }
+            </button>
+            <button
+                onClick={handleCopyToClipboard}
+                className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
+                aria-label="Sao chép"
+              >
+                {copySuccess ? <CheckIcon className="w-6 h-6 text-green-600" /> : <CopyIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />}
+            </button>
+          </div>
         </header>
 
         <div className="p-4 sm:p-6 md:p-8 overflow-y-auto flex-grow w-full max-w-4xl mx-auto" ref={contentRef}>
@@ -373,14 +453,45 @@ const ReaderPage: React.FC<{
   )
 }
 
+const SyncStatusIndicator: React.FC<{ status: SyncState }> = ({ status }) => {
+  const getStatusContent = () => {
+    switch (status) {
+      case 'syncing':
+        return { icon: <SpinnerIcon className="w-5 h-5 animate-spin" />, text: 'Đang đồng bộ...' };
+      case 'synced':
+        return { icon: <CloudCheckIcon className="w-5 h-5 text-green-500" />, text: 'Đã đồng bộ' };
+      case 'error':
+        return { icon: <AlertTriangleIcon className="w-5 h-5 text-red-500" />, text: 'Lỗi đồng bộ' };
+      default:
+        return { icon: <CloudIcon className="w-5 h-5" />, text: 'Đã kết nối' };
+    }
+  };
+
+  if (status === 'idle') return null;
+
+  const { icon, text } = getStatusContent();
+
+  return (
+    <div className={`fixed bottom-4 right-4 bg-[var(--color-bg-secondary)] text-[var(--color-text-secondary)] px-4 py-2 rounded-lg shadow-lg flex items-center gap-3 text-sm font-semibold transition-all animate-fade-in z-50`}>
+        {icon}
+        <span>{text}</span>
+    </div>
+  );
+};
+
 // ---- MAIN APP COMPONENT ---- //
 
 const App: React.FC = () => {
   const [panels, setPanels] = useState<PanelState[]>([createNewPanel()]);
   const [isBatchProcessing, setIsBatchProcessing] = useState<boolean>(false);
+  const [isDirectSaving, setIsDirectSaving] = useState<boolean>(false);
   const [batchProgress, setBatchProgress] = useState<string | null>(null);
 
   const [library, setLibrary] = useState<Library>({});
+  const [isLibraryLoading, setIsLibraryLoading] = useState<boolean>(true);
+  const [syncState, setSyncState] = useState<SyncState>('idle');
+  const syncTimerRef = useRef<number | null>(null);
+  
   const [activeStory, setActiveStory] = useState<string | null>(null);
   const [activeTagFilter, setActiveTagFilter] = useState<string | null>(null);
 
@@ -408,47 +519,78 @@ const App: React.FC = () => {
     setSettings(prev => ({ ...prev, ...newSettings }));
   };
 
-  useEffect(() => {
-    const loadedLibrary = loadLibrary();
-    setLibrary(loadedLibrary);
-
-    const lastStoryName = loadLastStoryName();
-    let initialPanelState = createNewPanel();
-
-    if (lastStoryName && loadedLibrary[lastStoryName]) {
-        const lastStoryData = loadedLibrary[lastStoryName];
-        const initialTags = lastStoryData.tags?.join(', ') || '';
-        
-        const chapterKeys = Object.keys(lastStoryData.chapters);
-        let nextChapterNumber = '1';
-
-        if (chapterKeys.length > 0) {
-            const chapterNumbers = chapterKeys
-                .map(k => parseFloat(k))
-                .filter(n => !isNaN(n));
-            
-            if (chapterNumbers.length > 0) {
-                const maxChapter = Math.max(...chapterNumbers);
-                nextChapterNumber = (Math.floor(maxChapter) + 1).toString();
-            }
-        }
-        
-        initialPanelState = {
-            ...initialPanelState,
-            storyName: lastStoryName,
-            tags: initialTags,
-            chapterNumber: nextChapterNumber
-        };
-    } else if (lastStoryName) {
-        initialPanelState = {
-            ...initialPanelState,
-            storyName: lastStoryName,
-            chapterNumber: '1',
-            tags: '', 
-        };
+  const handleSetSyncState = (state: SyncState) => {
+    setSyncState(state);
+    if (syncTimerRef.current) {
+        clearTimeout(syncTimerRef.current);
     }
-    setPanels([initialPanelState]);
-  }, []);
+    if (state === 'synced' || state === 'error') {
+        syncTimerRef.current = window.setTimeout(() => {
+            setSyncState('idle');
+        }, 3000);
+    }
+  };
+  
+  const saveLibrary = async (newLibrary: Library) => {
+    handleSetSyncState('syncing');
+    try {
+        await saveLibraryToFirebase(newLibrary);
+        handleSetSyncState('synced');
+    } catch (error) {
+        console.error("Firebase save error:", error);
+        handleSetSyncState('error');
+    }
+  };
+
+  useEffect(() => {
+    setIsLibraryLoading(true);
+    
+    // Bắt đầu lắng nghe thay đổi từ Firebase
+    const unsubscribe = listenToLibraryChanges(loadedLibrary => {
+        // Migration để đảm bảo dữ liệu cũ tương thích
+        const migratedLibrary = { ...loadedLibrary };
+        for (const storyName in migratedLibrary) {
+            const story = migratedLibrary[storyName];
+            if (!story.tags) story.tags = [];
+            if (!story.chapters) story.chapters = {};
+        }
+
+        setLibrary(migratedLibrary);
+
+        if (isLibraryLoading) { // Chỉ thực hiện logic này lần đầu
+            const lastStoryName = loadLastStoryName();
+            let initialPanelState = createNewPanel();
+
+            if (lastStoryName && migratedLibrary[lastStoryName]) {
+                const lastStoryData = migratedLibrary[lastStoryName];
+                const initialTags = lastStoryData.tags?.join(', ') || '';
+                const chapterKeys = Object.keys(lastStoryData.chapters);
+                let nextChapterNumber = '1';
+
+                if (chapterKeys.length > 0) {
+                    const maxChapter = Math.max(...chapterKeys.map(k => parseFloat(k)).filter(n => !isNaN(n)));
+                    if (isFinite(maxChapter)) {
+                        nextChapterNumber = (Math.floor(maxChapter) + 1).toString();
+                    }
+                }
+                
+                initialPanelState = { ...initialPanelState, storyName: lastStoryName, tags: initialTags, chapterNumber: nextChapterNumber };
+            } else if (lastStoryName) {
+                initialPanelState = { ...initialPanelState, storyName: lastStoryName, chapterNumber: '1', tags: '' };
+            }
+            setPanels([initialPanelState]);
+            setIsLibraryLoading(false);
+        }
+    });
+
+    // Hàm cleanup sẽ được gọi khi component bị unmount
+    return () => {
+        unsubscribe();
+        if (syncTimerRef.current) {
+            clearTimeout(syncTimerRef.current);
+        }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const addPanel = () => {
     const lastPanel = panels[panels.length - 1];
@@ -458,7 +600,6 @@ const App: React.FC = () => {
       newPanel.tags = lastPanel.tags;
       const lastChapterNum = parseFloat(lastPanel.chapterNumber);
       if (!isNaN(lastChapterNum)) {
-        // Increment from the integer part of the last chapter number
         newPanel.chapterNumber = (Math.floor(lastChapterNum) + 1).toString();
       }
     }
@@ -481,6 +622,74 @@ const App: React.FC = () => {
     setReaderData({ story, chapter });
     setCurrentView('reader');
   }, []);
+  
+  const handleSetBookmark = useCallback(async (storyName: string, chapter: string, scrollPosition: number) => {
+    const newLibrary = JSON.parse(JSON.stringify(library));
+    if (newLibrary[storyName]) {
+        newLibrary[storyName].bookmark = { chapter, scrollPosition };
+        await saveLibrary(newLibrary);
+    }
+  }, [library]);
+  
+  const handleRemoveBookmark = useCallback(async (storyName: string) => {
+      const newLibrary = JSON.parse(JSON.stringify(library));
+      if (newLibrary[storyName] && newLibrary[storyName].bookmark) {
+          delete newLibrary[storyName].bookmark;
+          await saveLibrary(newLibrary);
+      }
+  }, [library]);
+  
+  const resetPanelsAfterSuccess = () => {
+      const lastSuccessfulPanel = panels[panels.length - 1];
+      const newPanel = createNewPanel();
+      if (lastSuccessfulPanel) {
+          newPanel.storyName = lastSuccessfulPanel.storyName;
+          newPanel.tags = lastSuccessfulPanel.tags;
+          const lastChapterNum = parseFloat(lastSuccessfulPanel.chapterNumber);
+          if (!isNaN(lastChapterNum)) {
+              newPanel.chapterNumber = (Math.floor(lastChapterNum) + 1).toString();
+          }
+      }
+      setPanels([newPanel]);
+  };
+
+  const startDirectSave = async () => {
+    for (const panel of panels) {
+        if (!panel.storyName.trim() || !panel.chapterNumber.trim() || !panel.inputText.trim()) {
+            alert('Vui lòng điền đầy đủ Tên truyện, Số chương, và Nội dung cho tất cả các chương trước khi bắt đầu.');
+            return;
+        }
+    }
+
+    setIsDirectSaving(true);
+    const totalPanels = panels.length;
+    const newLibrary = JSON.parse(JSON.stringify(library));
+
+    for (let i = 0; i < totalPanels; i++) {
+        const panel = panels[i];
+        const trimmedStoryName = panel.storyName.trim();
+        saveLastStoryName(trimmedStoryName);
+
+        const trimmedChapterNumber = panel.chapterNumber.trim();
+        const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+
+        if (!newLibrary[trimmedStoryName]) {
+            newLibrary[trimmedStoryName] = { chapters: {}, lastModified: Date.now(), tags: [] };
+        }
+        newLibrary[trimmedStoryName].chapters[trimmedChapterNumber] = panel.inputText;
+        newLibrary[trimmedStoryName].lastModified = Date.now();
+        newLibrary[trimmedStoryName].tags = storyTags;
+        
+        if (i === 0 && currentView === 'editor') {
+          openReader(trimmedStoryName, trimmedChapterNumber);
+        }
+    }
+    
+    await saveLibrary(newLibrary);
+    setIsDirectSaving(false);
+    resetPanelsAfterSuccess();
+  };
+
 
   const startBatchTranslation = async () => {
     for (const panel of panels) {
@@ -492,6 +701,7 @@ const App: React.FC = () => {
 
     setIsBatchProcessing(true);
     const totalPanels = panels.length;
+    let newLibrary = JSON.parse(JSON.stringify(library));
 
     for (let i = 0; i < totalPanels; i++) {
         const panel = panels[i];
@@ -504,24 +714,22 @@ const App: React.FC = () => {
         try {
             const result = await refineVietnameseText(panel.inputText);
 
-            const currentLibrary = loadLibrary();
             const trimmedChapterNumber = panel.chapterNumber.trim();
             const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
-
-            if (!currentLibrary[trimmedStoryName]) {
-                currentLibrary[trimmedStoryName] = { chapters: {}, lastModified: Date.now(), tags: [] };
-            }
-            currentLibrary[trimmedStoryName].chapters[trimmedChapterNumber] = result;
-            currentLibrary[trimmedStoryName].lastModified = Date.now();
-            currentLibrary[trimmedStoryName].tags = storyTags;
             
-            saveLibrary(currentLibrary);
-            setLibrary(currentLibrary);
+            newLibrary = JSON.parse(JSON.stringify(newLibrary)); // Re-clone for immutability
+            if (!newLibrary[trimmedStoryName]) {
+                newLibrary[trimmedStoryName] = { chapters: {}, lastModified: Date.now(), tags: [] };
+            }
+            newLibrary[trimmedStoryName].chapters[trimmedChapterNumber] = result;
+            newLibrary[trimmedStoryName].lastModified = Date.now();
+            newLibrary[trimmedStoryName].tags = storyTags;
+            
+            await saveLibrary(newLibrary); // Save after each successful translation
 
             updatePanelState(panel.id, { isLoading: false });
 
-            // Automatically open the reader for the first successfully translated chapter.
-            if (i === 0) {
+            if (i === 0 && currentView === 'editor') {
               openReader(trimmedStoryName, trimmedChapterNumber);
             }
 
@@ -544,20 +752,7 @@ const App: React.FC = () => {
 
     setIsBatchProcessing(false);
     setBatchProgress(null);
-    // Removing the final alert as it is disruptive to the user who is now in the reader view.
-
-    // Reset the panels for the next session.
-    const lastSuccessfulPanel = panels[panels.length - 1];
-    const newPanel = createNewPanel();
-    if (lastSuccessfulPanel) {
-        newPanel.storyName = lastSuccessfulPanel.storyName;
-        newPanel.tags = lastSuccessfulPanel.tags;
-        const lastChapterNum = parseFloat(lastSuccessfulPanel.chapterNumber);
-        if (!isNaN(lastChapterNum)) {
-            newPanel.chapterNumber = (Math.floor(lastChapterNum) + 1).toString();
-        }
-    }
-    setPanels([newPanel]);
+    resetPanelsAfterSuccess();
   };
 
   const exitReader = useCallback(() => {
@@ -569,22 +764,25 @@ const App: React.FC = () => {
     setActiveStory(activeStory === story ? null : story);
   };
 
-  const deleteStory = (storyName: string) => {
+  const deleteStory = async (storyName: string) => {
     const newLibrary = { ...library };
     delete newLibrary[storyName];
-    setLibrary(newLibrary);
-    saveLibrary(newLibrary);
+    await saveLibrary(newLibrary);
     if (activeStory === storyName) {
         setActiveStory(null);
     }
   };
 
-  const deleteChapter = (storyName: string, chapterNumber: string) => {
+  const deleteChapter = async (storyName: string, chapterNumber: string) => {
       const newLibrary = JSON.parse(JSON.stringify(library)); // Deep copy
       if (newLibrary[storyName] && newLibrary[storyName].chapters) {
           delete newLibrary[storyName].chapters[chapterNumber];
-          setLibrary(newLibrary);
-          saveLibrary(newLibrary);
+          
+          if (newLibrary[storyName].bookmark?.chapter === chapterNumber) {
+            delete newLibrary[storyName].bookmark;
+          }
+          
+          await saveLibrary(newLibrary);
       }
   };
 
@@ -604,7 +802,6 @@ const App: React.FC = () => {
 
   const allTags = useMemo(() => {
     const tagsSet = new Set<string>();
-    // FIX: Explicitly type `story` as `StoryData` because Object.values can return an array of `unknown` for indexed types.
     Object.values(library).forEach((story: StoryData) => {
         story.tags?.forEach(tag => tagsSet.add(tag));
     });
@@ -615,17 +812,26 @@ const App: React.FC = () => {
     const keys = Object.keys(library);
     const filtered = activeTagFilter
       ? keys.filter(key => {
-          // FIX: Cast library[key] to StoryData to inform TypeScript of its type,
-          // as indexing an object with a string key can result in an 'unknown' type.
           const storyData = library[key] as StoryData;
           return storyData?.tags?.includes(activeTagFilter);
         })
       : keys;
-    // FIX: Also cast here for sorting to access lastModified property safely.
     return filtered.sort((a, b) => (library[b] as StoryData).lastModified - (library[a] as StoryData).lastModified);
   }, [library, activeTagFilter]);
 
-  const isBatchButtonDisabled = isBatchProcessing || panels.some(p => !p.storyName.trim() || !p.chapterNumber.trim() || !p.inputText.trim());
+  const isFormInvalid = panels.some(p => !p.storyName.trim() || !p.chapterNumber.trim() || !p.inputText.trim());
+  const isAnyProcessRunning = isBatchProcessing || isDirectSaving;
+
+  if (isLibraryLoading) {
+    return (
+        <div className="min-h-screen flex items-center justify-center bg-[var(--color-bg-primary)]">
+            <div className="flex flex-col items-center gap-4">
+                <SpinnerIcon className="w-12 h-12 text-[var(--color-accent-primary)] animate-spin" />
+                <p className="text-[var(--color-text-secondary)] font-semibold">Đang kết nối tới Cloud...</p>
+            </div>
+        </div>
+    );
+  }
 
   return (
     <>
@@ -656,26 +862,45 @@ const App: React.FC = () => {
                           canBeRemoved={panels.length > 1}
                         />
                       ))}
-                      {!isBatchProcessing && <AddPanelButton onClick={addPanel} />}
+                      {!isAnyProcessRunning && <AddPanelButton onClick={addPanel} />}
                   </div>
                 </div>
               </div>
 
               <div className="w-full flex justify-center mt-6">
-                  <button
-                  onClick={startBatchTranslation}
-                  disabled={isBatchButtonDisabled}
-                  className="inline-flex items-center justify-center bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold py-3 px-8 rounded-lg shadow-md hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:ring-offset-2 focus:ring-offset-[var(--color-bg-secondary)] transition-all duration-200 disabled:bg-[var(--color-accent-disabled)] disabled:cursor-not-allowed disabled:shadow-none w-full sm:w-auto max-w-md"
-                  >
-                  {isBatchProcessing ? (
-                      <>
-                      <SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5 text-[var(--color-text-accent)]" />
-                      {batchProgress || 'Đang xử lý...'}
-                      </>
-                  ) : (
-                      'Biên Dịch và Lưu Toàn Bộ'
-                  )}
-                  </button>
+                  <div className="flex flex-col sm:flex-row items-center gap-4 w-full max-w-lg">
+                      <button
+                        onClick={startDirectSave}
+                        disabled={isFormInvalid || isAnyProcessRunning}
+                        className="inline-flex items-center justify-center bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-bg-active)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:ring-offset-2 focus:ring-offset-[var(--color-bg-secondary)] transition-all duration-200 disabled:bg-[var(--color-bg-tertiary)] disabled:text-[var(--color-text-muted)] disabled:cursor-not-allowed disabled:shadow-none w-full sm:w-auto"
+                      >
+                         {isDirectSaving ? (
+                            <>
+                                <SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5" />
+                                Đang lưu...
+                            </>
+                         ) : (
+                            <>
+                                <SaveIcon className="-ml-1 mr-2 h-5 w-5" />
+                                Lưu Trực Tiếp
+                            </>
+                         )}
+                      </button>
+                      <button
+                      onClick={startBatchTranslation}
+                      disabled={isFormInvalid || isAnyProcessRunning}
+                      className="inline-flex items-center justify-center bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-accent-hover)] focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] focus:ring-offset-2 focus:ring-offset-[var(--color-bg-secondary)] transition-all duration-200 disabled:bg-[var(--color-accent-disabled)] disabled:cursor-not-allowed disabled:shadow-none w-full sm:w-auto"
+                      >
+                      {isBatchProcessing ? (
+                          <>
+                          <SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5 text-[var(--color-text-accent)]" />
+                          {batchProgress || 'Đang xử lý...'}
+                          </>
+                      ) : (
+                          'Biên Dịch và Lưu Toàn Bộ'
+                      )}
+                      </button>
+                  </div>
               </div>
           </div>
 
@@ -722,7 +947,7 @@ const App: React.FC = () => {
                                 <ChevronDownIcon className={`w-5 h-5 transition-transform flex-shrink-0 ml-2 text-[var(--color-text-secondary)] ${activeStory === story ? 'rotate-180' : ''}`}/>
                             </button>
                             <button 
-                                onClick={() => deleteStory(story)} 
+                                onClick={(e) => { e.stopPropagation(); deleteStory(story); }} 
                                 className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors ml-2 flex-shrink-0" 
                                 aria-label={`Xoá truyện ${story}`}>
                                 <TrashIcon className="w-5 h-5 text-[var(--color-text-muted)] hover:text-red-500" />
@@ -730,11 +955,24 @@ const App: React.FC = () => {
                         </div>
                       {activeStory === story && (
                         <div className="p-3 border-t border-[var(--color-border-secondary)] bg-[var(--color-bg-hover)]">
+                            {library[story].bookmark && (
+                                <button 
+                                    onClick={() => openReader(story, library[story].bookmark!.chapter)}
+                                    className="w-full flex items-center gap-3 text-left p-2 mb-2 rounded-md bg-[var(--color-accent-subtle-bg)] text-[var(--color-accent-subtle-text)] hover:bg-opacity-80 transition-all font-semibold"
+                                >
+                                    <BookmarkSolidIcon className="w-5 h-5 flex-shrink-0"/>
+                                    <span>Tiếp tục đọc: Chương {library[story].bookmark!.chapter}</span>
+                                </button>
+                            )}
                             <div className="space-y-1">
                                 {library[story].chapters && Object.keys(library[story].chapters).sort((a, b) => parseFloat(a) - parseFloat(b)).map(chapter => (
                                   <div key={chapter} className="flex justify-between items-center group rounded-md hover:bg-[var(--color-bg-active)]">
-                                    <button onClick={() => openReader(story, chapter)} className="flex-grow text-left p-2 text-[var(--color-text-secondary)]">
-                                        Chương {chapter}
+                                    <button onClick={() => openReader(story, chapter)} className="flex-grow flex items-center gap-2 text-left p-2 text-[var(--color-text-secondary)]">
+                                        {library[story].bookmark?.chapter === chapter ? 
+                                            <BookmarkSolidIcon className="w-4 h-4 text-[var(--color-accent-primary)] flex-shrink-0"/> : 
+                                            <div className="w-4 h-4 flex-shrink-0" />
+                                        }
+                                        <span>Chương {chapter}</span>
                                     </button>
                                     <button 
                                       onClick={() => deleteChapter(story, chapter)} 
@@ -771,6 +1009,8 @@ const App: React.FC = () => {
           onChapterChange={openReader}
           onExit={exitReader}
           settings={settings}
+          onSetBookmark={handleSetBookmark}
+          onRemoveBookmark={handleRemoveBookmark}
         />
       )}
 
@@ -780,6 +1020,7 @@ const App: React.FC = () => {
         settings={settings}
         onSettingsChange={handleSettingsChange}
       />
+      <SyncStatusIndicator status={syncState} />
     </>
   );
 };
