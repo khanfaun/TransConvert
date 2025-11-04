@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { SettingsIcon, BookmarkIcon, BookmarkSolidIcon, CopyIcon, CheckIcon, ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowUpIcon, ArrowDownIcon, PlayCircleIcon, PauseCircleIcon } from '../Icons';
 import type { AppSettings, Library } from '../../types';
+import { ToastNotification } from '../ui/ToastNotification';
 
 export const ReaderPage: React.FC<{
   storyName: string;
@@ -19,6 +20,7 @@ export const ReaderPage: React.FC<{
   const [isSpeedSelectorOpen, setIsSpeedSelectorOpen] = useState(false);
   const [autoScrollSpeed, setAutoScrollSpeed] = useState(0);
   const [isDesktop, setIsDesktop] = useState(window.innerWidth >= 768);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const chapterListRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -45,6 +47,17 @@ export const ReaderPage: React.FC<{
     const next = currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
     return { chapterList: chapters, prevChapter: prev, nextChapter: next };
   }, [storyData, chapterNumber]);
+
+  // Toast notification logic for new chapters
+  const chapterCount = useMemo(() => (storyData?.chapters ? Object.keys(storyData.chapters).length : 0), [storyData]);
+  const prevChapterCountRef = useRef(chapterCount);
+
+  useEffect(() => {
+    if (prevChapterCountRef.current > 0 && chapterCount > prevChapterCountRef.current) {
+        setToastMessage('Chương mới đã được lưu!');
+    }
+    prevChapterCountRef.current = chapterCount;
+  }, [chapterCount]);
 
   useEffect(() => {
     const contentElement = contentRef.current;
@@ -292,6 +305,12 @@ export const ReaderPage: React.FC<{
 
   return (
     <div className="fixed inset-0 bg-[var(--color-bg-primary)] z-40 flex flex-col animate-fade-in">
+        {toastMessage && (
+            <ToastNotification 
+                message={toastMessage} 
+                onClose={() => setToastMessage(null)}
+            />
+        )}
         <header className="flex items-center justify-between p-3 sm:p-4 border-b border-[var(--color-border-secondary)] flex-shrink-0 w-full max-w-5xl mx-auto">
           <button onClick={onExit} className="flex items-center gap-2 p-2 rounded-lg hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label="Quay lại">
             <ArrowLeftIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
