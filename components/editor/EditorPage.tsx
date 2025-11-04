@@ -157,7 +157,15 @@ export const EditorPage: React.FC<{
         setIsDirectSaving(false);
         setBatchProgress(null);
         setBatchProgressPercent(0);
-        setToastMessage(`Đã lưu ${totalPanels > 1 ? `${totalPanels} chương` : 'chương'} thành công!`);
+
+        const processAction = isTranslation ? 'dịch xong' : 'lưu';
+        if (totalPanels === 1) {
+            const chapterNumber = panels[0].chapterNumber.trim();
+            setToastMessage(`Đã ${processAction} chương ${chapterNumber}!`);
+        } else {
+            setToastMessage(`Đã ${processAction} ${totalPanels} chương thành công!`);
+        }
+
         setPanels(getInitialPanels());
     };
 
