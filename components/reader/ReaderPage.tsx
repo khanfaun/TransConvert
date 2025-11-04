@@ -197,13 +197,12 @@ export const ReaderPage: React.FC<{
       const deltaTime = timestamp - lastTimeRef.current;
       lastTimeRef.current = timestamp;
 
-      // New speed scale based on pixels per second for smoother scrolling
-      // Speed 1 -> 20px/s, 2 -> 30px/s, ..., 5 -> 60px/s
-      const pixelsPerSecond = 5 + autoScrollSpeed * 5;
+      // Giảm tốc độ cơ bản và hệ số nhân để cuộn chậm và mượt hơn trên màn hình FPS cao.
+      const pixelsPerSecond = 5 + autoScrollSpeed * 8;
       const scrollAmount = (pixelsPerSecond * deltaTime) / 1000;
       
       scrollPositionRef.current += scrollAmount;
-      contentElement.scrollTop = Math.round(scrollPositionRef.current);
+      contentElement.scrollTop = scrollPositionRef.current;
 
       if (contentElement.scrollTop + contentElement.clientHeight >= contentElement.scrollHeight - 1) {
         setAutoScrollSpeed(0);
