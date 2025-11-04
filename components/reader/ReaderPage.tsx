@@ -28,7 +28,11 @@ export const ReaderPage: React.FC<{
   const legacyAutoScrollIntervalRef = useRef<number | null>(null);
   const autoScrollIconIntervalRef = useRef<number | null>(null);
   const speedSelectorRef = useRef<HTMLDivElement>(null);
-  const autoScrollIntervalRef = useRef<number | null>(null);
+  
+  // Refs for smooth scrolling animation
+  const animationFrameRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number>(0);
+  const scrollPositionRef = useRef<number>(0);
 
   const storyData = library[storyName];
   const bookmark = storyData?.bookmark;
@@ -178,27 +182,49 @@ export const ReaderPage: React.FC<{
         window.removeEventListener('auxclick', handleAuxClick);
         stopScrolling();
         if (autoScrollIconIntervalRef.current) window.clearInterval(autoScrollIconIntervalRef.current);
-        if (autoScrollIntervalRef.current) window.clearInterval(autoScrollIntervalRef.current);
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
   }, [storyName, prevChapter, nextChapter, onChapterChange]);
 
   useEffect(() => {
     const contentElement = contentRef.current;
-    if (autoScrollIntervalRef.current) {
-        clearInterval(autoScrollIntervalRef.current);
-        autoScrollIntervalRef.current = null;
-    }
-    if (!contentElement || autoScrollSpeed === 0) return;
+    if (!contentElement) return;
 
-    const scrollStep = 0.25 + autoScrollSpeed * 0.25;
-    const scroll = () => {
-        const { scrollTop, scrollHeight, clientHeight } = contentElement;
-        if (scrollTop + clientHeight >= scrollHeight - 1) setAutoScrollSpeed(0);
-        else contentElement.scrollTop += scrollStep;
+    const scrollAnimation = (timestamp: number) => {
+      if (lastTimeRef.current === 0) {
+        lastTimeRef.current = timestamp;
+      }
+      const deltaTime = timestamp - lastTimeRef.current;
+      lastTimeRef.current = timestamp;
+
+      // New speed scale based on pixels per second for smoother scrolling
+      // Speed 1 -> 20px/s, 2 -> 30px/s, ..., 5 -> 60px/s
+      const pixelsPerSecond = 5 + autoScrollSpeed * 5;
+      const scrollAmount = (pixelsPerSecond * deltaTime) / 1000;
+      
+      scrollPositionRef.current += scrollAmount;
+      contentElement.scrollTop = Math.round(scrollPositionRef.current);
+
+      if (contentElement.scrollTop + contentElement.clientHeight >= contentElement.scrollHeight - 1) {
+        setAutoScrollSpeed(0);
+      } else {
+        animationFrameRef.current = requestAnimationFrame(scrollAnimation);
+      }
     };
-    autoScrollIntervalRef.current = window.setInterval(scroll, 16);
-    return () => { if (autoScrollIntervalRef.current) clearInterval(autoScrollIntervalRef.current); };
-  }, [autoScrollSpeed]);
+
+    if (autoScrollSpeed > 0) {
+      lastTimeRef.current = 0; // Reset time for animation start
+      scrollPositionRef.current = contentElement.scrollTop; // Start from current position
+      animationFrameRef.current = requestAnimationFrame(scrollAnimation);
+    }
+
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = null;
+      }
+    };
+  }, [autoScrollSpeed, setAutoScrollSpeed]);
   
   useEffect(() => {
     const contentElement = contentRef.current;
