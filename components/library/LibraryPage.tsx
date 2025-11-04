@@ -62,10 +62,26 @@ export const LibraryPage: React.FC<{
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4">
                         {filteredLibraryKeys.map(story => {
                             const storyData = library[story];
+                            const chapterKeys = storyData.chapters ? Object.keys(storyData.chapters) : [];
+                            let latestChapter: number | string | null = null;
+                            if (chapterKeys.length > 0) {
+                                const chapterNumbers = chapterKeys.map(k => ({ key: k, num: parseFloat(k) })).filter(item => !isNaN(item.num));
+                                if (chapterNumbers.length > 0) {
+                                    const maxChapter = chapterNumbers.reduce((max, current) => current.num > max.num ? current : max, chapterNumbers[0]);
+                                    latestChapter = maxChapter.key;
+                                }
+                            }
                             return (
                                 <div key={story} className="bg-[var(--color-bg-secondary)] rounded-2xl shadow-lg shadow-[var(--shadow-color)] p-4 sm:p-5 flex flex-col">
                                     <div className="flex-grow cursor-pointer" onClick={() => onViewChapters(story)}>
-                                        <h3 className="font-bold text-lg text-[var(--color-text-primary)] truncate" title={story}>{story}</h3>
+                                        <div className="flex justify-between items-start">
+                                            <h3 className="font-bold text-lg text-[var(--color-text-primary)] pr-2" title={story}>{story}</h3>
+                                            {latestChapter !== null && (
+                                                <span className="text-xs font-semibold whitespace-nowrap text-[var(--color-text-secondary)] bg-[var(--color-bg-tertiary)] px-2.5 py-1 rounded-full flex-shrink-0">
+                                                    Chương mới nhất: {latestChapter}
+                                                </span>
+                                            )}
+                                        </div>
                                         <div className="flex flex-wrap gap-1.5 mt-2">{storyData.tags?.map(tag => (<span key={tag} className="text-xs bg-[var(--color-accent-subtle-bg)] text-[var(--color-accent-subtle-text)] px-2 py-0.5 rounded-full">{tag}</span>))}</div>
                                     </div>
                                     

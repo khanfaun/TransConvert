@@ -106,11 +106,6 @@ const App: React.FC = () => {
     setReaderData(null);
   };
   
-  const handleSaveComplete = (storyName: string) => {
-      setSelectedStory(storyName);
-      setCurrentView('chapterList');
-  };
-
   // ---- DATA HANDLERS ---- //
   const handleSetBookmark = useCallback(async (storyName: string, chapter: string, scrollPosition: number) => {
     const newLibrary = JSON.parse(JSON.stringify(library));
@@ -279,7 +274,6 @@ const App: React.FC = () => {
                           storyName={selectedStory}
                           storyData={library[selectedStory]}
                           library={library}
-                          onSaveComplete={handleSaveComplete}
                           onBack={handleBackToLibrary}
                           saveLibrary={saveLibrary}
                       />
