@@ -28,15 +28,12 @@ export interface Library {
 }
 
 export type SyncState = 'idle' | 'syncing' | 'synced' | 'error';
+export type AppView = 'library' | 'chapterList' | 'editor' | 'reader';
 
 export interface RenameModalData {
   type: 'story' | 'chapter';
   oldName: string;
   storyName?: string; // For chapter rename
-}
-
-export interface RetryModalData {
-    panelId: string;
 }
 
 export interface DeleteModalData {

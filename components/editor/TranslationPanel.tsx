@@ -32,10 +32,8 @@ export const TranslationPanel: React.FC<{
                 id={`story-name-${id}`}
                 type="text"
                 value={storyName}
-                onChange={(e) => onUpdate(id, { storyName: e.target.value })}
-                placeholder="VD: Phàm Nhân Tu Tiên"
-                className="mt-1 w-full p-3 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-ring)] transition-colors duration-200"
-                disabled={isLoading}
+                className="mt-1 w-full p-3 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-tertiary)] text-[var(--color-text-muted)] cursor-not-allowed"
+                disabled
             />
          </div>
          <div className="sm:col-span-2">
@@ -50,6 +48,7 @@ export const TranslationPanel: React.FC<{
                 placeholder="VD: 1, 2, 10.5..."
                 className="mt-1 w-full p-3 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-ring)] transition-colors duration-200"
                 disabled={isLoading}
+                autoFocus
             />
          </div>
       </div>
