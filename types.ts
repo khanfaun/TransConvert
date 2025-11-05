@@ -47,19 +47,3 @@ export interface AppSettings {
     font: 'sans' | 'serif' | 'mono';
     fontSize: number;
 }
-
-export interface TranslationQueueTask {
-  storyName: string;
-  chapterNumber: string;
-  rawText: string;
-  tags: string[];
-  status: 'pending' | 'processing' | 'error';
-  createdAt: number;
-  // Các trường khác có thể được thêm bởi Cloud Function
-  startedAt?: number;
-  errorMessage?: string;
-}
-
-export interface TranslationQueue {
-  [taskId: string]: TranslationQueueTask;
-}

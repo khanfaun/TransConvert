@@ -10,7 +10,6 @@ import { ConfirmationModal } from './components/modals/ConfirmationModal';
 import { AddStoryModal } from './components/modals/AddStoryModal';
 import { ReaderPage } from './components/reader/ReaderPage';
 import { SyncStatusIndicator } from './components/ui/SyncStatusIndicator';
-import { TranslationStatusIndicator } from './components/ui/TranslationStatusIndicator';
 import { SpinnerIcon } from './components/Icons';
 import { LibraryPage } from './components/library/LibraryPage';
 import { ChapterListPage } from './components/library/ChapterListPage';
@@ -315,7 +314,6 @@ const App: React.FC = () => {
       <SettingsModal isOpen={isSettingsModalOpen} onClose={() => setIsSettingsModalOpen(false)} settings={settings} onSettingsChange={handleSettingsChange} />
       <AddStoryModal isOpen={isAddStoryModalOpen} onClose={() => setIsAddStoryModalOpen(false)} onConfirm={handleConfirmAddStory} library={library} />
       <SyncStatusIndicator status={syncState} />
-      <TranslationStatusIndicator />
     </>
   );
 };

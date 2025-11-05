@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { refineVietnameseText } from '../../services/geminiService';
-import { addChaptersToTranslationQueue, TranslationTask } from '../../services/firebaseService';
 import { SpinnerIcon, SaveIcon, ArrowLeftIcon } from '../Icons';
 import { TranslationPanel } from './TranslationPanel';
 import { AddPanelButton } from './AddPanelButton';
+import { ProgressBar } from '../ui/ProgressBar';
 import { ToastNotification } from '../ui/ToastNotification';
 import type { PanelState, Library, StoryData } from '../../types';
 
@@ -35,8 +35,10 @@ export const EditorPage: React.FC<{
     };
 
     const [panels, setPanels] = useState<PanelState[]>(getInitialPanels);
-    const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+    const [isBatchProcessing, setIsBatchProcessing] = useState<boolean>(false);
     const [isDirectSaving, setIsDirectSaving] = useState<boolean>(false);
+    const [batchProgress, setBatchProgress] = useState<string | null>(null);
+    const [batchProgressPercent, setBatchProgressPercent] = useState<number>(0);
     const [toastMessage, setToastMessage] = useState<string | null>(null);
 
     const updatePanelState = (id: string, updates: Partial<PanelState>) => {
@@ -59,7 +61,6 @@ export const EditorPage: React.FC<{
         }
     };
     
-    // This function remains for potential direct use or retry, but is not the main flow
     const handleTranslateSinglePanel = async (panelId: string): Promise<boolean> => {
         const panel = panels.find(p => p.id === panelId);
         if (!panel || !panel.inputText.trim()) return false;
@@ -89,40 +90,7 @@ export const EditorPage: React.FC<{
         }
     };
     
-    // NEW: Handles submitting to the queue
-    const handleSubmitToQueue = async () => {
-        for (const panel of panels) {
-            if (!panel.chapterNumber.trim() || !panel.inputText.trim()) {
-                alert('Vui lòng điền đầy đủ Số chương và Nội dung cho tất cả các panel.');
-                return;
-            }
-        }
-        
-        setIsSubmitting(true);
-        try {
-            const tasks: TranslationTask[] = panels.map(p => ({
-                storyName: storyName,
-                chapterNumber: p.chapterNumber.trim(),
-                rawText: p.inputText,
-                tags: p.tags.split(',').map(tag => tag.trim()).filter(Boolean)
-            }));
-
-            await addChaptersToTranslationQueue(tasks);
-
-            setToastMessage(`Đã gửi ${tasks.length} chương vào hàng đợi xử lý!`);
-            setPanels(getInitialPanels()); // Reset panels
-            onBack(); // Go back to library to see results appear
-
-        } catch (error) {
-            console.error("Error submitting to queue:", error);
-            alert("Đã có lỗi xảy ra khi gửi yêu cầu dịch. Vui lòng thử lại.");
-        } finally {
-            setIsSubmitting(false);
-        }
-    };
-
-    // MODIFIED: `startProcess` is now only for direct saving
-    const startDirectSave = async () => {
+    const startProcess = async (isTranslation: boolean) => {
         for (const panel of panels) {
             if (!panel.chapterNumber.trim() || !panel.inputText.trim()) {
                 alert('Vui lòng điền đầy đủ Số chương và Nội dung cho tất cả các panel.');
@@ -130,37 +98,79 @@ export const EditorPage: React.FC<{
             }
         }
 
-        setIsDirectSaving(true);
+        isTranslation ? setIsBatchProcessing(true) : setIsDirectSaving(true);
+        setBatchProgressPercent(0);
+        const totalPanels = panels.length;
         let cumulativeLibrary = JSON.parse(JSON.stringify(library));
 
-        for (const panel of panels) {
+        for (let i = 0; i < totalPanels; i++) {
+            const panel = panels[i];
+            setBatchProgress(`Đang xử lý chương ${panel.chapterNumber} (${i + 1}/${totalPanels})...`);
             updatePanelState(panel.id, { isLoading: true, error: null });
-            
-            const trimmedChapterNumber = panel.chapterNumber.trim();
-            const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
-            
-            if (!cumulativeLibrary[storyName].chapters) {
-              cumulativeLibrary[storyName].chapters = {};
+
+            try {
+                const result = isTranslation 
+                    ? await refineVietnameseText(panel.inputText) 
+                    : panel.inputText;
+
+                if (isTranslation && (!result || result.trim() === '')) {
+                    throw new Error("API không trả về nội dung nào.");
+                }
+
+                const trimmedChapterNumber = panel.chapterNumber.trim();
+                const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+                
+                if (!cumulativeLibrary[storyName].chapters) {
+                  cumulativeLibrary[storyName].chapters = {};
+                }
+                cumulativeLibrary[storyName].chapters[trimmedChapterNumber] = result;
+                cumulativeLibrary[storyName].lastModified = Date.now();
+                cumulativeLibrary[storyName].tags = storyTags;
+                
+                // Save after each successful step
+                await saveLibrary(cumulativeLibrary);
+                
+                updatePanelState(panel.id, { isLoading: false });
+                
+                const progress = Math.round(((i + 1) / totalPanels) * 100);
+                setBatchProgressPercent(progress);
+
+                if (isTranslation && i < totalPanels - 1) {
+                    const waitTime = 30000;
+                    setBatchProgress(`Đã xong ${i + 1}/${totalPanels}. Chờ ${waitTime / 1000}s...`);
+                    await new Promise(resolve => setTimeout(resolve, waitTime));
+                }
+            } catch (err) {
+                console.error(err);
+                const errorMessage = err instanceof Error ? err.message : "Lỗi không xác định.";
+                updatePanelState(panel.id, { isLoading: false, error: errorMessage });
+                setIsBatchProcessing(false);
+                setIsDirectSaving(false);
+                setBatchProgress(null);
+                setBatchProgressPercent(0);
+                alert(`Lỗi khi xử lý chương ${panel.chapterNumber}: ${errorMessage}. Quá trình đã dừng lại.`);
+                return;
             }
-            cumulativeLibrary[storyName].chapters[trimmedChapterNumber] = panel.inputText;
-            cumulativeLibrary[storyName].lastModified = Date.now();
-            cumulativeLibrary[storyName].tags = storyTags;
         }
 
-        try {
-            await saveLibrary(cumulativeLibrary);
-            setToastMessage(`Đã lưu trực tiếp ${panels.length} chương thành công!`);
-            setPanels(getInitialPanels());
-        } catch (error) {
-            console.error("Direct save error:", error);
-            alert("Lỗi khi lưu trực tiếp.");
-        } finally {
-            setIsDirectSaving(false);
+        setIsBatchProcessing(false);
+        setIsDirectSaving(false);
+        setBatchProgress(null);
+        setBatchProgressPercent(0);
+
+        const processAction = isTranslation ? 'dịch xong' : 'lưu';
+        if (totalPanels === 1) {
+            const chapterNumber = panels[0].chapterNumber.trim();
+            setToastMessage(`Đã ${processAction} chương ${chapterNumber}!`);
+        } else {
+            setToastMessage(`Đã ${processAction} ${totalPanels} chương thành công!`);
         }
+
+        setPanels(getInitialPanels());
     };
 
     const isFormInvalid = panels.some(p => !p.chapterNumber.trim() || !p.inputText.trim());
-    const isAnyProcessRunning = isSubmitting || isDirectSaving;
+    const isAnyProcessRunning = isBatchProcessing || isDirectSaving;
 
     return (
         <>
@@ -201,16 +211,19 @@ export const EditorPage: React.FC<{
 
                     <div className="w-full flex justify-center mt-6">
                         <div className="flex flex-col sm:flex-row items-center gap-4 w-full max-w-lg">
-                            <button onClick={startDirectSave} disabled={isFormInvalid || isAnyProcessRunning} className="inline-flex items-center justify-center bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-bg-active)] disabled:bg-[var(--color-bg-tertiary)] disabled:text-[var(--color-text-muted)] disabled:cursor-not-allowed w-full sm:w-auto">
+                            <button onClick={() => startProcess(false)} disabled={isFormInvalid || isAnyProcessRunning} className="inline-flex items-center justify-center bg-[var(--color-bg-tertiary)] text-[var(--color-text-secondary)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-bg-active)] disabled:bg-[var(--color-bg-tertiary)] disabled:text-[var(--color-text-muted)] disabled:cursor-not-allowed w-full sm:w-auto">
                                 {isDirectSaving ? (<><SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5" />Đang lưu...</>) : (<><SaveIcon className="-ml-1 mr-2 h-5 w-5" />Lưu Trực Tiếp</>)}
                             </button>
-                            <button onClick={handleSubmitToQueue} disabled={isFormInvalid || isAnyProcessRunning} className="relative inline-flex items-center justify-center bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-accent-hover)] disabled:bg-[var(--color-accent-disabled)] disabled:cursor-not-allowed w-full sm:w-auto overflow-hidden">
-                                {isSubmitting ? (
+                            <button onClick={() => startProcess(true)} disabled={isFormInvalid || isAnyProcessRunning} className="relative inline-flex items-center justify-center bg-[var(--color-accent-primary)] text-[var(--color-text-accent)] font-semibold py-3 px-6 rounded-lg shadow-md hover:bg-[var(--color-accent-hover)] disabled:bg-[var(--color-accent-disabled)] disabled:cursor-not-allowed w-full sm:w-auto overflow-hidden">
+                                {isBatchProcessing ? (
                                     <>
-                                    <SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5" />
-                                    <span>Đang gửi...</span>
+                                    <ProgressBar progress={batchProgressPercent} />
+                                    <div className="relative z-10 flex items-center">
+                                        <SpinnerIcon className="animate-spin -ml-1 mr-3 h-5 w-5" />
+                                        <span>{batchProgress || 'Đang xử lý...'}</span>
+                                    </div>
                                     </>
-                                ) : ('Gửi đi Dịch')}
+                                ) : ('Biên Dịch và Lưu')}
                             </button>
                         </div>
                     </div>
