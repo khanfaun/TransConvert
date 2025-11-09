@@ -31,6 +31,7 @@ export const ReaderPage: React.FC<{
   
   // Refs for smooth scrolling animation
   const animationFrameRef = useRef<number | null>(null);
+  const manualScrollAnimationRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const scrollPositionRef = useRef<number>(0);
 
@@ -45,10 +46,10 @@ export const ReaderPage: React.FC<{
 
   const { chapterList, prevChapter, nextChapter } = useMemo(() => {
     if (!storyData || !storyData.chapters) return { chapterList: [], prevChapter: null, nextChapter: null };
-    const chapters = Object.keys(storyData.chapters).sort((a, b) => parseFloat(a) - parseFloat(b));
+    const chapters = Object.keys(storyData.chapters).sort((a, b) => parseFloat(b) - parseFloat(a));
     const currentIndex = chapters.indexOf(chapterNumber);
-    const prev = currentIndex > 0 ? chapters[currentIndex - 1] : null;
-    const next = currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
+    const prev = currentIndex < chapters.length - 1 ? chapters[currentIndex + 1] : null;
+    const next = currentIndex > 0 ? chapters[currentIndex - 1] : null;
     return { chapterList: chapters, prevChapter: prev, nextChapter: next };
   }, [storyData, chapterNumber]);
 
@@ -66,6 +67,9 @@ export const ReaderPage: React.FC<{
   useEffect(() => {
     const contentElement = contentRef.current;
     if (!contentElement) return;
+
+    // Immediately focus the content area for keyboard controls.
+    contentElement.focus({ preventScroll: true });
 
     const currentBookmark = library[storyName]?.bookmark;
 
@@ -89,8 +93,7 @@ export const ReaderPage: React.FC<{
         }, 50);
         return () => clearTimeout(timer);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [storyName, chapterNumber]);
+  }, [storyName, chapterNumber, library, onSetBookmark]);
 
   useEffect(() => {
     const contentElement = contentRef.current;
@@ -130,61 +133,127 @@ export const ReaderPage: React.FC<{
     const contentElement = contentRef.current;
     if (!contentElement) return;
 
-    const handleKeyDown = (event: KeyboardEvent) => {
-        if (event.key === 'ArrowLeft' && prevChapter) onChapterChange(storyName, prevChapter);
-        else if (event.key === 'ArrowRight' && nextChapter) onChapterChange(storyName, nextChapter);
-        
-        const target = event.target as HTMLElement;
-        if (['0', '1', '2', '3', '4', '5'].includes(event.key) && target.tagName.toLowerCase() !== 'input' && target.tagName.toLowerCase() !== 'textarea') {
-            event.preventDefault();
-            const newSpeed = parseInt(event.key, 10);
-            setAutoScrollSpeed(prevSpeed => (prevSpeed === newSpeed ? 0 : newSpeed));
+    // --- Smooth Keyboard Scrolling ---
+    let manualScrollDirection: 'up' | 'down' | null = null;
+    let lastManualScrollTime = 0;
+    
+    const smoothScrollStep = (timestamp: number) => {
+        if (!lastManualScrollTime) {
+            lastManualScrollTime = timestamp;
+        }
+        const deltaTime = timestamp - lastManualScrollTime;
+        lastManualScrollTime = timestamp;
+
+        if (contentElement && manualScrollDirection) {
+            // Tốc độ cuộn, đơn vị pixels/giây. Giảm giá trị này để cuộn chậm hơn nữa.
+            const PIXELS_PER_SECOND = 80;
+            const scrollAmount = (PIXELS_PER_SECOND * deltaTime) / 1000;
+            
+            contentElement.scrollTop += manualScrollDirection === 'down' ? scrollAmount : -scrollAmount;
+            manualScrollAnimationRef.current = requestAnimationFrame(smoothScrollStep);
         }
     };
+    
+    const startSmoothScroll = (direction: 'up' | 'down') => {
+        if (manualScrollAnimationRef.current) return;
+        manualScrollDirection = direction;
+        setAutoScrollSpeed(0); // Stop auto-scrolling
+        lastManualScrollTime = 0; // Reset time for animation start
+        manualScrollAnimationRef.current = requestAnimationFrame(smoothScrollStep);
+    };
 
-    const startScrolling = (direction: 'up' | 'down') => {
+    const stopSmoothScroll = () => {
+        if (manualScrollAnimationRef.current) {
+            cancelAnimationFrame(manualScrollAnimationRef.current);
+            manualScrollAnimationRef.current = null;
+        }
+        manualScrollDirection = null;
+    };
+    // --- End Smooth Scrolling ---
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+        const target = event.target as HTMLElement;
+        const isTyping = ['input', 'textarea'].includes(target.tagName.toLowerCase());
+        
+        if (isTyping) return;
+
+        switch(event.key) {
+            case 'ArrowLeft':
+                if (prevChapter) onChapterChange(storyName, prevChapter);
+                break;
+            case 'ArrowRight':
+                if (nextChapter) onChapterChange(storyName, nextChapter);
+                break;
+            case 'ArrowUp':
+                event.preventDefault();
+                startSmoothScroll('up');
+                break;
+            case 'ArrowDown':
+                event.preventDefault();
+                startSmoothScroll('down');
+                break;
+            default:
+                if (['0', '1', '2', '3', '4', '5'].includes(event.key)) {
+                    event.preventDefault();
+                    const newSpeed = parseInt(event.key, 10);
+                    setAutoScrollSpeed(prevSpeed => (prevSpeed === newSpeed ? 0 : newSpeed));
+                }
+                break;
+        }
+    };
+    
+    const handleKeyUp = (event: KeyboardEvent) => {
+        if (event.key === 'ArrowUp' || event.key === 'ArrowDown') {
+            event.preventDefault();
+            stopSmoothScroll();
+        }
+    };
+    
+    // --- Legacy Mouse Scroll (buttons 4 & 5) ---
+    const startLegacyScrolling = (direction: 'up' | 'down') => {
         if (legacyAutoScrollIntervalRef.current) return;
         const scrollAmount = direction === 'down' ? 2 : -2;
         legacyAutoScrollIntervalRef.current = window.setInterval(() => {
             contentElement.scrollTop += scrollAmount;
         }, 16);
     };
-
-    const stopScrolling = () => {
+    const stopLegacyScrolling = () => {
         if (legacyAutoScrollIntervalRef.current) {
             window.clearInterval(legacyAutoScrollIntervalRef.current);
             legacyAutoScrollIntervalRef.current = null;
         }
     };
-    
     const handleMouseDown = (e: MouseEvent) => {
-        if (e.button === 3) { e.preventDefault(); startScrolling('down'); }
-        else if (e.button === 4) { e.preventDefault(); startScrolling('up'); }
+        if (e.button === 3) { e.preventDefault(); startLegacyScrolling('down'); }
+        else if (e.button === 4) { e.preventDefault(); startLegacyScrolling('up'); }
     };
-    
     const handleMouseUp = (e: MouseEvent) => {
-        if (e.button === 3 || e.button === 4) { e.preventDefault(); stopScrolling(); }
+        if (e.button === 3 || e.button === 4) { e.preventDefault(); stopLegacyScrolling(); }
     };
-    
     const handleAuxClick = (e: MouseEvent) => {
         if (e.button === 3 || e.button === 4) e.preventDefault();
     };
-    
+    // --- End Legacy Mouse Scroll ---
+
     window.addEventListener('keydown', handleKeyDown);
+    window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('mousedown', handleMouseDown);
     window.addEventListener('mouseup', handleMouseUp);
     window.addEventListener('auxclick', handleAuxClick);
 
     return () => {
         window.removeEventListener('keydown', handleKeyDown);
+        window.removeEventListener('keyup', handleKeyUp);
         window.removeEventListener('mousedown',handleMouseDown);
         window.removeEventListener('mouseup', handleMouseUp);
         window.removeEventListener('auxclick', handleAuxClick);
-        stopScrolling();
+        stopLegacyScrolling();
+        stopSmoothScroll();
         if (autoScrollIconIntervalRef.current) window.clearInterval(autoScrollIconIntervalRef.current);
         if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [storyName, prevChapter, nextChapter, onChapterChange]);
+  }, [storyName, prevChapter, nextChapter, onChapterChange, setAutoScrollSpeed]);
+
 
   useEffect(() => {
     const contentElement = contentRef.current;
@@ -287,6 +356,7 @@ export const ReaderPage: React.FC<{
       window.clearInterval(autoScrollIconIntervalRef.current);
       autoScrollIconIntervalRef.current = null;
     }
+    contentRef.current?.focus({ preventScroll: true });
   };
   
   const handleSpeedSelect = (speed: number) => {
@@ -366,7 +436,7 @@ export const ReaderPage: React.FC<{
           </div>
         </header>
 
-        <div className="relative overflow-y-auto flex-grow w-full reader-content" ref={contentRef}>
+        <div className="relative overflow-y-auto flex-grow w-full reader-content outline-none" ref={contentRef} tabIndex={-1}>
             <div className="w-full max-w-4xl mx-auto p-4 sm:p-6 md:p-8">
                 <div className="text-left leading-relaxed text-[var(--color-text-primary)]" style={readerStyle}>
                   {paragraphs.map((p, index) => {

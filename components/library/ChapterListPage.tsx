@@ -11,7 +11,7 @@ export const ChapterListPage: React.FC<{
     onDeleteChapter: (chapterNumber: string) => void;
 }> = ({ storyName, storyData, onOpenReader, onBack, onRenameChapter, onDeleteChapter }) => {
     
-    const sortedChapters = storyData.chapters ? Object.keys(storyData.chapters).sort((a, b) => parseFloat(a) - parseFloat(b)) : [];
+    const sortedChapters = storyData.chapters ? Object.keys(storyData.chapters).sort((a, b) => parseFloat(b) - parseFloat(a)) : [];
 
     return (
         <main className="min-h-screen flex flex-col p-4 sm:p-6 animate-fade-in">
