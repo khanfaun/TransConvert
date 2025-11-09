@@ -2,13 +2,16 @@ import React from 'react';
 import type { PanelState } from '../../types';
 import { CloseIcon, AlertTriangleIcon, RefreshIcon } from '../Icons';
 
-export const TranslationPanel: React.FC<{
+interface TranslationPanelProps {
   panel: PanelState;
   onUpdate: (id: string, updates: Partial<PanelState>) => void;
   onRemove: (id: string) => void;
   canBeRemoved: boolean;
   onRetry: (id: string) => void;
-}> = ({ panel, onUpdate, onRemove, canBeRemoved, onRetry }) => {
+  isProcessing: boolean;
+}
+
+export const TranslationPanel: React.FC<TranslationPanelProps> = ({ panel, onUpdate, onRemove, canBeRemoved, onRetry, isProcessing }) => {
   const { id, storyName, chapterNumber, inputText, tags, isLoading, error } = panel;
   
   return (
@@ -16,7 +19,8 @@ export const TranslationPanel: React.FC<{
       {canBeRemoved && (
         <button 
           onClick={() => onRemove(id)}
-          className="absolute top-3 right-3 p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors z-10"
+          disabled={isProcessing}
+          className="absolute top-3 right-3 p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors z-10 disabled:opacity-50 disabled:cursor-not-allowed"
           aria-label="Xoá panel"
         >
           <CloseIcon className="w-5 h-5 text-[var(--color-text-muted)]" />
@@ -47,7 +51,7 @@ export const TranslationPanel: React.FC<{
                 onChange={(e) => onUpdate(id, { chapterNumber: e.target.value })}
                 placeholder="VD: 1, 2, 10.5..."
                 className="mt-1 w-full p-3 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-ring)] transition-colors duration-200"
-                disabled={isLoading}
+                disabled={isLoading || isProcessing}
                 autoFocus
             />
          </div>
@@ -63,7 +67,7 @@ export const TranslationPanel: React.FC<{
                 onChange={(e) => onUpdate(id, { tags: e.target.value })}
                 placeholder="VD: Tiên Hiệp, Trọng Sinh..."
                 className="mt-1 w-full p-3 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-ring)] transition-colors duration-200"
-                disabled={isLoading}
+                disabled={isLoading || isProcessing}
             />
        </div>
       
@@ -77,7 +81,7 @@ export const TranslationPanel: React.FC<{
           onChange={(e) => onUpdate(id, { inputText: e.target.value })}
           placeholder="Dán nội dung truyện cần biên dịch vào đây..."
           className="mt-1 w-full flex-grow h-48 p-3 rounded-lg border border-[var(--color-border-primary)] bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] focus:ring-2 focus:ring-[var(--color-ring)] focus:border-[var(--color-ring)] transition-colors duration-200 resize-y"
-          disabled={isLoading}
+          disabled={isLoading || isProcessing}
         />
       </div>
 
@@ -89,7 +93,7 @@ export const TranslationPanel: React.FC<{
           </div>
           <button
             onClick={() => onRetry(id)}
-            disabled={isLoading}
+            disabled={isLoading || isProcessing}
             className="p-2 rounded-full bg-red-100 hover:bg-red-200 disabled:opacity-50 transition-colors"
             aria-label="Thử lại"
           >

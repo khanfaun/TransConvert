@@ -64,6 +64,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
                                 onRemove={onRemovePanel}
                                 canBeRemoved={panels.length > 1}
                                 onRetry={onRetryPanel}
+                                isProcessing={isAnyProcessRunning}
                                 />
                             ))}
                             {!isAnyProcessRunning && <AddPanelButton onClick={onAddPanel} />}
