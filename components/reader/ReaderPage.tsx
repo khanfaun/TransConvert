@@ -27,7 +27,6 @@ export const ReaderPage: React.FC<{
   const contentRef = useRef<HTMLDivElement>(null);
   const scrollTimeoutRef = useRef<number | null>(null);
   const legacyAutoScrollIntervalRef = useRef<number | null>(null);
-  const autoScrollIconIntervalRef = useRef<number | null>(null);
   const speedSelectorRef = useRef<HTMLDivElement>(null);
   
   // Refs for smooth scrolling animation
@@ -35,6 +34,8 @@ export const ReaderPage: React.FC<{
   const manualScrollAnimationRef = useRef<number | null>(null);
   const lastTimeRef = useRef<number>(0);
   const scrollPositionRef = useRef<number>(0);
+  const manualScrollDirectionRef = useRef<'up' | 'down' | null>(null);
+  const lastManualScrollTimeRef = useRef<number>(0);
 
   const storyData = library[storyName];
   const bookmark = storyData?.bookmark;
@@ -133,47 +134,47 @@ export const ReaderPage: React.FC<{
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isChapterListOpen, isSpeedSelectorOpen]);
 
+  // --- Reusable Smooth Scrolling Logic ---
+  const stopSmoothScroll = useCallback(() => {
+    if (manualScrollAnimationRef.current) {
+      cancelAnimationFrame(manualScrollAnimationRef.current);
+      manualScrollAnimationRef.current = null;
+    }
+    manualScrollDirectionRef.current = null;
+    contentRef.current?.focus({ preventScroll: true });
+  }, []);
+
+  const startSmoothScroll = useCallback((direction: 'up' | 'down') => {
+    if (manualScrollAnimationRef.current) return;
+    manualScrollDirectionRef.current = direction;
+    setAutoScrollSpeed(0);
+    lastManualScrollTimeRef.current = 0;
+
+    const smoothScrollStep = (timestamp: number) => {
+      if (lastManualScrollTimeRef.current === 0) {
+        lastManualScrollTimeRef.current = timestamp;
+      }
+      const deltaTime = timestamp - lastManualScrollTimeRef.current;
+      lastManualScrollTimeRef.current = timestamp;
+
+      const contentElement = contentRef.current;
+      if (contentElement && manualScrollDirectionRef.current) {
+        const PIXELS_PER_SECOND = 80;
+        const scrollAmount = (PIXELS_PER_SECOND * deltaTime) / 1000;
+        
+        contentElement.scrollTop += manualScrollDirectionRef.current === 'down' ? scrollAmount : -scrollAmount;
+        manualScrollAnimationRef.current = requestAnimationFrame(smoothScrollStep);
+      } else {
+        stopSmoothScroll();
+      }
+    };
+    
+    manualScrollAnimationRef.current = requestAnimationFrame(smoothScrollStep);
+  }, [setAutoScrollSpeed, stopSmoothScroll]);
+  
   useEffect(() => {
     const contentElement = contentRef.current;
     if (!contentElement) return;
-
-    // --- Smooth Keyboard Scrolling ---
-    let manualScrollDirection: 'up' | 'down' | null = null;
-    let lastManualScrollTime = 0;
-    
-    const smoothScrollStep = (timestamp: number) => {
-        if (!lastManualScrollTime) {
-            lastManualScrollTime = timestamp;
-        }
-        const deltaTime = timestamp - lastManualScrollTime;
-        lastManualScrollTime = timestamp;
-
-        if (contentElement && manualScrollDirection) {
-            // Tốc độ cuộn, đơn vị pixels/giây. Giảm giá trị này để cuộn chậm hơn nữa.
-            const PIXELS_PER_SECOND = 80;
-            const scrollAmount = (PIXELS_PER_SECOND * deltaTime) / 1000;
-            
-            contentElement.scrollTop += manualScrollDirection === 'down' ? scrollAmount : -scrollAmount;
-            manualScrollAnimationRef.current = requestAnimationFrame(smoothScrollStep);
-        }
-    };
-    
-    const startSmoothScroll = (direction: 'up' | 'down') => {
-        if (manualScrollAnimationRef.current) return;
-        manualScrollDirection = direction;
-        setAutoScrollSpeed(0); // Stop auto-scrolling
-        lastManualScrollTime = 0; // Reset time for animation start
-        manualScrollAnimationRef.current = requestAnimationFrame(smoothScrollStep);
-    };
-
-    const stopSmoothScroll = () => {
-        if (manualScrollAnimationRef.current) {
-            cancelAnimationFrame(manualScrollAnimationRef.current);
-            manualScrollAnimationRef.current = null;
-        }
-        manualScrollDirection = null;
-    };
-    // --- End Smooth Scrolling ---
 
     const handleKeyDown = (event: KeyboardEvent) => {
         const target = event.target as HTMLElement;
@@ -253,10 +254,9 @@ export const ReaderPage: React.FC<{
         window.removeEventListener('auxclick', handleAuxClick);
         stopLegacyScrolling();
         stopSmoothScroll();
-        if (autoScrollIconIntervalRef.current) window.clearInterval(autoScrollIconIntervalRef.current);
         if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
     };
-  }, [storyName, prevChapter, nextChapter, onChapterChange, setAutoScrollSpeed]);
+  }, [storyName, prevChapter, nextChapter, onChapterChange, setAutoScrollSpeed, startSmoothScroll, stopSmoothScroll]);
 
 
   useEffect(() => {
@@ -345,37 +345,9 @@ export const ReaderPage: React.FC<{
     return style;
   }, [settings.font, settings.fontSize]);
   
-  const startIconScrolling = (direction: 'up' | 'down') => {
-    if (autoScrollIconIntervalRef.current) window.clearInterval(autoScrollIconIntervalRef.current);
-    const contentElement = contentRef.current;
-    if (!contentElement) return;
-    const scrollAmount = direction === 'down' ? 6 : -6;
-    autoScrollIconIntervalRef.current = window.setInterval(() => {
-      contentElement.scrollTop += scrollAmount;
-    }, 16);
-  };
-
-  const stopIconScrolling = () => {
-    if (autoScrollIconIntervalRef.current) {
-      window.clearInterval(autoScrollIconIntervalRef.current);
-      autoScrollIconIntervalRef.current = null;
-    }
-    contentRef.current?.focus({ preventScroll: true });
-  };
-  
   const handleSpeedSelect = (speed: number) => {
     setAutoScrollSpeed(prev => prev === speed ? 0 : speed);
     setIsSpeedSelectorOpen(false);
-  };
-
-  const upButtonProps = isDesktop ? {
-      onMouseDown: () => { startIconScrolling('up'); if (autoScrollSpeed > 0) setAutoScrollSpeed(0); },
-      onMouseUp: stopIconScrolling,
-      onMouseLeave: stopIconScrolling,
-      'aria-label': "Nhấn giữ để cuộn lên"
-  } : {
-      onClick: () => contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' }),
-      'aria-label': "Về đầu trang"
   };
 
   const ChapterNavigation: React.FC = () => (
@@ -453,10 +425,30 @@ export const ReaderPage: React.FC<{
                 </div>
             </div>
             <div className="fixed bottom-6 right-6 z-20 flex flex-col gap-3">
-                <button {...upButtonProps} className="w-12 h-12 rounded-full bg-[var(--color-bg-secondary)] shadow-lg flex items-center justify-center hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors">
+                <button
+                    onMouseDown={() => startSmoothScroll('up')}
+                    onMouseUp={stopSmoothScroll}
+                    onMouseLeave={stopSmoothScroll}
+                    onTouchStart={() => startSmoothScroll('up')}
+                    onTouchEnd={stopSmoothScroll}
+                    className="w-12 h-12 rounded-full bg-[var(--color-bg-secondary)] shadow-lg flex items-center justify-center hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
+                    aria-label="Nhấn giữ để cuộn lên"
+                >
                     <ArrowUpIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
                 </button>
-                {isDesktop && (<button onMouseDown={() => startIconScrolling('down')} onMouseUp={stopIconScrolling} onMouseLeave={stopIconScrolling} className="w-12 h-12 rounded-full bg-[var(--color-bg-secondary)] shadow-lg flex items-center justify-center hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label="Nhấn giữ để cuộn xuống"><ArrowDownIcon className="w-6 h-6 text-[var(--color-text-secondary)]" /></button>)}
+                {isDesktop && (
+                    <button
+                        onMouseDown={() => startSmoothScroll('down')}
+                        onMouseUp={stopSmoothScroll}
+                        onMouseLeave={stopSmoothScroll}
+                        onTouchStart={() => startSmoothScroll('down')}
+                        onTouchEnd={stopSmoothScroll}
+                        className="w-12 h-12 rounded-full bg-[var(--color-bg-secondary)] shadow-lg flex items-center justify-center hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
+                        aria-label="Nhấn giữ để cuộn xuống"
+                    >
+                        <ArrowDownIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
+                    </button>
+                )}
             </div>
         </div>
 
