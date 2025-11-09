@@ -171,6 +171,10 @@ export const ReaderPage: React.FC<{
     
     manualScrollAnimationRef.current = requestAnimationFrame(smoothScrollStep);
   }, [setAutoScrollSpeed, stopSmoothScroll]);
+
+  const handleScrollToTop = useCallback(() => {
+    contentRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  }, []);
   
   useEffect(() => {
     const contentElement = contentRef.current;
@@ -425,17 +429,28 @@ export const ReaderPage: React.FC<{
                 </div>
             </div>
             <div className="fixed bottom-6 right-6 z-20 flex flex-col gap-3">
-                <button
-                    onMouseDown={() => startSmoothScroll('up')}
-                    onMouseUp={stopSmoothScroll}
-                    onMouseLeave={stopSmoothScroll}
-                    onTouchStart={() => startSmoothScroll('up')}
-                    onTouchEnd={stopSmoothScroll}
-                    className="w-12 h-12 rounded-full bg-[var(--color-bg-secondary)] shadow-lg flex items-center justify-center hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
-                    aria-label="Nhấn giữ để cuộn lên"
-                >
-                    <ArrowUpIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
-                </button>
+                {isDesktop ? (
+                    <button
+                        onMouseDown={() => startSmoothScroll('up')}
+                        onMouseUp={stopSmoothScroll}
+                        onMouseLeave={stopSmoothScroll}
+                        onTouchStart={() => startSmoothScroll('up')}
+                        onTouchEnd={stopSmoothScroll}
+                        className="w-12 h-12 rounded-full bg-[var(--color-bg-secondary)] shadow-lg flex items-center justify-center hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
+                        aria-label="Nhấn giữ để cuộn lên"
+                    >
+                        <ArrowUpIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
+                    </button>
+                ) : (
+                    <button
+                        onClick={handleScrollToTop}
+                        className="w-12 h-12 rounded-full bg-[var(--color-bg-secondary)] shadow-lg flex items-center justify-center hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors"
+                        aria-label="Cuộn lên đầu trang"
+                    >
+                        <ArrowUpIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
+                    </button>
+                )}
+                
                 {isDesktop && (
                     <button
                         onMouseDown={() => startSmoothScroll('down')}
