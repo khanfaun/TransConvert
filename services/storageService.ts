@@ -3,41 +3,8 @@ import { DEMO_LIBRARY } from './demoData';
 import type { Library, AppSettings } from '../types';
 
 
-const LAST_STORY_NAME_KEY = 'ai_story_translator_last_story';
 const SETTINGS_KEY = 'ai_story_translator_settings';
 
-
-/**
- * Lưu tên truyện được sử dụng gần nhất.
- * @param {string} name Tên truyện.
- */
-export const saveLastStoryName = (name: string): void => {
-    if (DEV_MODE_ENABLED) {
-        return; // Không lưu trong dev mode
-    }
-    try {
-        localStorage.setItem(LAST_STORY_NAME_KEY, name);
-    } catch (error) {
-        console.error("Lỗi khi lưu tên truyện gần nhất:", error);
-    }
-};
-
-/**
- * Tải tên truyện được sử dụng gần nhất.
- * @returns {string} Tên truyện hoặc chuỗi rỗng.
- */
-export const loadLastStoryName = (): string => {
-    if (DEV_MODE_ENABLED) {
-        return Object.keys(DEMO_LIBRARY)[0] || ''; // Trả về tên truyện đầu tiên trong demo data
-    }
-    try {
-        return localStorage.getItem(LAST_STORY_NAME_KEY) || '';
-    } catch (error) {
-        // FIX: Added missing curly braces for the catch block.
-        console.error("Lỗi khi tải tên truyện gần nhất:", error);
-        return '';
-    }
-};
 
 /**
  * Tải cài đặt từ localStorage.
@@ -87,6 +54,7 @@ export const saveSettings = (settings: AppSettings): void => {
     try {
         const serializedSettings = JSON.stringify(settings);
         localStorage.setItem(SETTINGS_KEY, serializedSettings);
+    // Fix: Added curly braces to the catch block for correct syntax.
     } catch (error) {
         console.error("Lỗi khi lưu cài đặt vào localStorage:", error);
     }

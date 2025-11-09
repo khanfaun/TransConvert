@@ -74,13 +74,16 @@ export const ReaderPage: React.FC<{
 
     const currentBookmark = library[storyName]?.bookmark;
 
+    // If opening a chapter that is NOT the bookmarked one, scroll to top and set a new bookmark.
     if (!currentBookmark || currentBookmark.chapter !== chapterNumber) {
         contentElement.scrollTop = 0;
+        // Set a new bookmark for this new chapter after a short delay
         const timer = setTimeout(() => {
             onSetBookmark(storyName, chapterNumber, 0);
         }, 100);
         return () => clearTimeout(timer);
     } 
+    // If opening the bookmarked chapter, restore scroll position.
     else if (currentBookmark) {
         const timer = setTimeout(() => {
             if (contentRef.current) {
@@ -91,7 +94,7 @@ export const ReaderPage: React.FC<{
                     contentRef.current.scrollTop = 0;
                 }
             }
-        }, 50);
+        }, 50); // Delay to allow content to render and scrollHeight to be accurate
         return () => clearTimeout(timer);
     }
   }, [storyName, chapterNumber, library, onSetBookmark]);

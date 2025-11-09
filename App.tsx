@@ -153,6 +153,7 @@ const App: React.FC = () => {
           bookmarkRef.chapter = chapter;
           bookmarkRef.scrollPosition = scrollPosition;
         }
+        setLibrary(newLibrary); // Optimistic update
         await saveLibrary(newLibrary);
     }
   }, [library]);
@@ -168,9 +169,11 @@ const App: React.FC = () => {
       if (readToIndex <= 0) delete bookmarkRef.readToIndex;
       else {
           bookmarkRef.readToIndex = readToIndex;
+          // Ensure the chapter is updated if readToIndex is set on a new chapter
           bookmarkRef.chapter = chapter;
       }
     }
+    setLibrary(newLibrary); // Optimistic update
     await saveLibrary(newLibrary);
   }, [library]);
   
@@ -178,6 +181,7 @@ const App: React.FC = () => {
       const newLibrary = JSON.parse(JSON.stringify(library));
       if (newLibrary[storyName]?.bookmark) {
           delete newLibrary[storyName].bookmark;
+          setLibrary(newLibrary); // Optimistic update
           await saveLibrary(newLibrary);
       }
   }, [library]);
@@ -336,6 +340,7 @@ const App: React.FC = () => {
             cumulativeLibrary[selectedStory].lastModified = Date.now();
             cumulativeLibrary[selectedStory].tags = storyTags;
             
+            // Save after each successful step
             await saveLibrary(cumulativeLibrary);
             
             updatePanelState(panel.id, { isLoading: false });
