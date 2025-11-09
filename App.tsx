@@ -1,8 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { loadSettings, saveSettings } from './services/storageService';
 import { listenToLibraryChanges, saveLibraryToFirebase } from './services/firebaseService';
+import { refineVietnameseText } from './services/geminiService';
 
-import type { Library, AppSettings, RenameModalData, DeleteModalData, SyncState, AppView } from './types';
+import type { Library, AppSettings, RenameModalData, DeleteModalData, SyncState, AppView, PanelState } from './types';
 
 import { SettingsModal } from './components/modals/SettingsModal';
 import { RenameModal } from './components/modals/RenameModal';
@@ -14,6 +15,7 @@ import { SpinnerIcon } from './components/Icons';
 import { LibraryPage } from './components/library/LibraryPage';
 import { ChapterListPage } from './components/library/ChapterListPage';
 import { EditorPage } from './components/editor/EditorPage';
+import { ToastNotification } from './components/ui/ToastNotification';
 
 
 const App: React.FC = () => {
@@ -33,6 +35,14 @@ const App: React.FC = () => {
   const [isAddStoryModalOpen, setIsAddStoryModalOpen] = useState(false);
   const [renameModalData, setRenameModalData] = useState<RenameModalData | null>(null);
   const [deleteModalData, setDeleteModalData] = useState<DeleteModalData | null>(null);
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Editor State (Lifted from EditorPage)
+  const [panels, setPanels] = useState<PanelState[]>([]);
+  const [isBatchProcessing, setIsBatchProcessing] = useState<boolean>(false);
+  const [isDirectSaving, setIsDirectSaving] = useState<boolean>(false);
+  const [batchProgress, setBatchProgress] = useState<string | null>(null);
+  const [batchProgressPercent, setBatchProgressPercent] = useState<number>(0);
 
   useEffect(() => {
     const html = document.documentElement;
@@ -84,7 +94,27 @@ const App: React.FC = () => {
       setCurrentView('chapterList');
   };
 
+  const createNewPanel = (storyName: string, chapterNumber: string, tags: string): PanelState => ({
+    id: `panel-${Date.now()}-${Math.random()}`,
+    storyName,
+    chapterNumber,
+    inputText: '',
+    tags,
+    isLoading: false,
+    error: null,
+  });
+
   const handleAddNewChapter = (storyName: string) => {
+      const storyData = library[storyName];
+      if (!storyData) return;
+
+      const chapterKeys = storyData.chapters ? Object.keys(storyData.chapters) : [];
+      const nextChapterNumber = chapterKeys.length > 0
+          ? (Math.floor(Math.max(...chapterKeys.map(k => parseFloat(k)).filter(n => !isNaN(n)))) + 1).toString()
+          : '1';
+      const tags = storyData.tags?.join(', ') || '';
+      
+      setPanels([createNewPanel(storyName, nextChapterNumber, tags)]);
       setSelectedStory(storyName);
       setCurrentView('editor');
   };
@@ -211,6 +241,139 @@ const App: React.FC = () => {
     setRenameModalData(null);
   };
 
+  // ---- EDITOR LOGIC (LIFTED) ---- //
+  const updatePanelState = (id: string, updates: Partial<PanelState>) => {
+    setPanels(currentPanels =>
+        currentPanels.map(p => (p.id === id ? { ...p, ...updates } : p))
+    );
+  };
+
+  const addPanel = () => {
+    if (!selectedStory) return;
+    const lastPanel = panels[panels.length - 1];
+    const lastChapterNum = parseFloat(lastPanel.chapterNumber);
+    const nextChapterNum = !isNaN(lastChapterNum) ? (Math.floor(lastChapterNum) + 1).toString() : '';
+    const newPanel = createNewPanel(selectedStory, nextChapterNum, lastPanel.tags);
+    setPanels([...panels, newPanel]);
+  };
+
+  const removePanel = (id: string) => {
+    if (panels.length > 1) {
+        setPanels(panels.filter(p => p.id !== id));
+    }
+  };
+
+  const handleTranslateSinglePanel = async (panelId: string): Promise<boolean> => {
+    const panel = panels.find(p => p.id === panelId);
+    if (!panel || !panel.inputText.trim() || !selectedStory) return false;
+
+    updatePanelState(panel.id, { isLoading: true, error: null });
+    try {
+        const result = await refineVietnameseText(panel.inputText);
+        if (!result || result.trim() === '') {
+            throw new Error("API không trả về nội dung nào.");
+        }
+        const newLibrary = JSON.parse(JSON.stringify(library));
+        const trimmedChapterNumber = panel.chapterNumber.trim();
+        const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+        
+        newLibrary[selectedStory].chapters[trimmedChapterNumber] = result;
+        newLibrary[selectedStory].lastModified = Date.now();
+        newLibrary[selectedStory].tags = storyTags;
+        
+        await saveLibrary(newLibrary);
+        updatePanelState(panel.id, { isLoading: false });
+        return true;
+    } catch (err) {
+        console.error(err);
+        const errorMessage = err instanceof Error ? err.message : "Đã xảy ra lỗi không xác định.";
+        updatePanelState(panel.id, { isLoading: false, error: errorMessage });
+        return false;
+    }
+  };
+
+  const handleStartProcess = async (isTranslation: boolean) => {
+    if (!selectedStory) return;
+
+    for (const panel of panels) {
+        if (!panel.chapterNumber.trim() || !panel.inputText.trim()) {
+            alert('Vui lòng điền đầy đủ Số chương và Nội dung cho tất cả các panel.');
+            return;
+        }
+    }
+
+    isTranslation ? setIsBatchProcessing(true) : setIsDirectSaving(true);
+    setBatchProgressPercent(0);
+    const totalPanels = panels.length;
+    let cumulativeLibrary = JSON.parse(JSON.stringify(library));
+
+    for (let i = 0; i < totalPanels; i++) {
+        const panel = panels[i];
+        setBatchProgress(`Đang xử lý chương ${panel.chapterNumber} (${i + 1}/${totalPanels})...`);
+        updatePanelState(panel.id, { isLoading: true, error: null });
+
+        try {
+            const result = isTranslation 
+                ? await refineVietnameseText(panel.inputText) 
+                : panel.inputText;
+
+            if (isTranslation && (!result || result.trim() === '')) {
+                throw new Error("API không trả về nội dung nào.");
+            }
+
+            const trimmedChapterNumber = panel.chapterNumber.trim();
+            const storyTags = panel.tags.split(',').map(tag => tag.trim()).filter(Boolean);
+            
+            if (!cumulativeLibrary[selectedStory].chapters) {
+              cumulativeLibrary[selectedStory].chapters = {};
+            }
+            cumulativeLibrary[selectedStory].chapters[trimmedChapterNumber] = result;
+            cumulativeLibrary[selectedStory].lastModified = Date.now();
+            cumulativeLibrary[selectedStory].tags = storyTags;
+            
+            await saveLibrary(cumulativeLibrary);
+            
+            updatePanelState(panel.id, { isLoading: false });
+            
+            const progress = Math.round(((i + 1) / totalPanels) * 100);
+            setBatchProgressPercent(progress);
+
+            if (isTranslation && i < totalPanels - 1) {
+                const waitTime = 30000;
+                setBatchProgress(`Đã xong ${i + 1}/${totalPanels}. Chờ ${waitTime / 1000}s...`);
+                await new Promise(resolve => setTimeout(resolve, waitTime));
+            }
+        } catch (err) {
+            console.error(err);
+            const errorMessage = err instanceof Error ? err.message : "Lỗi không xác định.";
+            updatePanelState(panel.id, { isLoading: false, error: errorMessage });
+            setIsBatchProcessing(false);
+            setIsDirectSaving(false);
+            setBatchProgress(null);
+            setBatchProgressPercent(0);
+            alert(`Lỗi khi xử lý chương ${panel.chapterNumber}: ${errorMessage}. Quá trình đã dừng lại.`);
+            return;
+        }
+    }
+
+    setIsBatchProcessing(false);
+    setIsDirectSaving(false);
+    setBatchProgress(null);
+    setBatchProgressPercent(0);
+
+    const processAction = isTranslation ? 'dịch xong' : 'lưu';
+    if (totalPanels === 1) {
+        const chapterNumber = panels[0].chapterNumber.trim();
+        setToastMessage(`Đã ${processAction} chương ${chapterNumber}!`);
+    } else {
+        setToastMessage(`Đã ${processAction} ${totalPanels} chương thành công!`);
+    }
+
+    // Reset editor state by navigating back to chapter list
+    handleBackToChapterList();
+  };
+
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
@@ -218,7 +381,7 @@ const App: React.FC = () => {
         else if (renameModalData) setRenameModalData(null);
         else if (isSettingsModalOpen) setIsSettingsModalOpen(false);
         else if (isAddStoryModalOpen) setIsAddStoryModalOpen(false);
-        else if (currentView === 'reader') handleBackToLibrary();
+        else if (currentView === 'reader') handleBackToChapterList();
         else if (currentView === 'chapterList' || currentView === 'editor') handleBackToLibrary();
       }
     };
@@ -260,6 +423,7 @@ const App: React.FC = () => {
                           storyData={library[selectedStory]}
                           onOpenReader={handleOpenReader}
                           onBack={handleBackToLibrary}
+                          onAddNewChapter={handleAddNewChapter}
                           onRenameChapter={(chapter) => setRenameModalData({type: 'chapter', oldName: chapter, storyName: selectedStory})}
                           onDeleteChapter={(chapter) => setDeleteModalData({type: 'chapter', storyName: selectedStory, chapterNumber: chapter})}
                       />
@@ -272,10 +436,17 @@ const App: React.FC = () => {
                   return (
                       <EditorPage
                           storyName={selectedStory}
-                          storyData={library[selectedStory]}
-                          library={library}
-                          onBack={handleBackToLibrary}
-                          saveLibrary={saveLibrary}
+                          onBack={handleBackToChapterList}
+                          panels={panels}
+                          onUpdatePanel={updatePanelState}
+                          onAddPanel={addPanel}
+                          onRemovePanel={removePanel}
+                          onRetryPanel={handleTranslateSinglePanel}
+                          isBatchProcessing={isBatchProcessing}
+                          isDirectSaving={isDirectSaving}
+                          batchProgress={batchProgress}
+                          batchProgressPercent={batchProgressPercent}
+                          onStartProcess={handleStartProcess}
                       />
                   );
               }
@@ -289,7 +460,7 @@ const App: React.FC = () => {
                           chapterNumber={readerData.chapter}
                           library={library}
                           onChapterChange={handleOpenReader}
-                          onExit={handleBackToLibrary}
+                          onExit={handleBackToChapterList}
                           settings={settings}
                           onSetBookmark={handleSetBookmark}
                           onRemoveBookmark={handleRemoveBookmark}
@@ -308,6 +479,9 @@ const App: React.FC = () => {
 
   return (
     <>
+      {toastMessage && (
+          <ToastNotification message={toastMessage} onClose={() => setToastMessage(null)} />
+      )}
       {renderContent()}
       <RenameModal data={renameModalData} onClose={() => setRenameModalData(null)} onConfirm={handleConfirmRename} library={library} />
       <ConfirmationModal data={deleteModalData} onClose={() => setDeleteModalData(null)} onConfirm={handleConfirmDelete} />

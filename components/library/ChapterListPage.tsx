@@ -1,15 +1,16 @@
 import React from 'react';
 import type { StoryData } from '../../types';
-import { ArrowLeftIcon, BookmarkSolidIcon, EditIcon, TrashIcon } from '../Icons';
+import { ArrowLeftIcon, BookmarkSolidIcon, EditIcon, TrashIcon, PlusIcon } from '../Icons';
 
 export const ChapterListPage: React.FC<{
     storyName: string;
     storyData: StoryData;
     onOpenReader: (story: string, chapter: string) => void;
     onBack: () => void;
+    onAddNewChapter: (storyName: string) => void;
     onRenameChapter: (chapterNumber: string) => void;
     onDeleteChapter: (chapterNumber: string) => void;
-}> = ({ storyName, storyData, onOpenReader, onBack, onRenameChapter, onDeleteChapter }) => {
+}> = ({ storyName, storyData, onOpenReader, onBack, onAddNewChapter, onRenameChapter, onDeleteChapter }) => {
     
     const sortedChapters = storyData.chapters ? Object.keys(storyData.chapters).sort((a, b) => parseFloat(b) - parseFloat(a)) : [];
 
@@ -24,7 +25,9 @@ export const ChapterListPage: React.FC<{
                     <h1 className="text-2xl sm:text-3xl font-bold text-[var(--color-text-primary)] truncate" title={storyName}>{storyName}</h1>
                     <p className="text-[var(--color-text-muted)] mt-1">{sortedChapters.length} chương</p>
                 </div>
-                <div className="w-24 flex-shrink-0"></div>
+                <button onClick={() => onAddNewChapter(storyName)} className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors ml-4 flex-shrink-0" aria-label="Thêm chương mới">
+                    <PlusIcon className="w-7 h-7 text-[var(--color-text-secondary)]" />
+                </button>
             </header>
 
             <div className="w-full max-w-5xl mx-auto flex-grow">
@@ -60,7 +63,10 @@ export const ChapterListPage: React.FC<{
                 ) : (
                     <div className="text-center text-[var(--color-text-muted)] py-16 bg-[var(--color-bg-secondary)] rounded-2xl shadow-xl shadow-[var(--shadow-color)]">
                         <p className="font-semibold">Truyện này chưa có chương nào.</p>
-                        <p className="text-sm mt-2">Bạn có thể quay lại thư viện và thêm chương mới.</p>
+                        <button onClick={() => onAddNewChapter(storyName)} className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-accent-primary)] hover:text-[var(--color-accent-hover)]">
+                            <PlusIcon className="w-5 h-5" />
+                            Thêm chương đầu tiên
+                        </button>
                     </div>
                 )}
             </div>

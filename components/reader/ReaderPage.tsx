@@ -409,7 +409,7 @@ export const ReaderPage: React.FC<{
         <header className="flex items-center justify-between p-3 sm:p-4 border-b border-[var(--color-border-secondary)] flex-shrink-0 w-full max-w-5xl mx-auto">
           <button onClick={onExit} className="flex items-center gap-2 p-2 rounded-lg hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label="Quay lại">
             <ArrowLeftIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
-            <span className="hidden sm:inline text-md font-semibold text-[var(--color-text-secondary)]">Thư viện</span>
+            <span className="hidden sm:inline text-md font-semibold text-[var(--color-text-secondary)]">DS Chương</span>
           </button>
           <h2 className="text-lg sm:text-xl font-bold text-[var(--color-text-primary)] text-center truncate px-2" title={`${storyName} - Chương ${chapterNumber}`}>{`Chương ${chapterNumber}`}</h2>
           <div className="flex items-center gap-1 sm:gap-2">
