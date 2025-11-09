@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { SettingsIcon, BookmarkIcon, BookmarkSolidIcon, CopyIcon, CheckIcon, ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowUpIcon, ArrowDownIcon, PlayCircleIcon, PauseCircleIcon } from '../Icons';
+import { SettingsIcon, BookmarkIcon, BookmarkSolidIcon, CopyIcon, CheckIcon, ArrowLeftIcon, ChevronLeftIcon, ChevronRightIcon, ListIcon, ArrowUpIcon, ArrowDownIcon, PlayCircleIcon, PauseCircleIcon, PlusIcon } from '../Icons';
 import type { AppSettings, Library } from '../../types';
 import { ToastNotification } from '../ui/ToastNotification';
 
@@ -8,13 +8,14 @@ export const ReaderPage: React.FC<{
   chapterNumber: string;
   library: Library;
   onChapterChange: (story: string, chapter: string) => void;
-  onExit: () => void;
+  onBack: () => void;
   settings: AppSettings;
   onSetBookmark: (story: string, chapter: string, scrollPosition: number) => void;
   onRemoveBookmark: (story: string) => void;
   onSetReadToIndex: (story: string, chapter: string, index: number) => void;
   onOpenSettings: () => void;
-}> = ({ storyName, chapterNumber, library, onChapterChange, onExit, settings, onSetBookmark, onRemoveBookmark, onSetReadToIndex, onOpenSettings }) => {
+  onAddNewChapter: (storyName: string) => void;
+}> = ({ storyName, chapterNumber, library, onChapterChange, onBack, settings, onSetBookmark, onRemoveBookmark, onSetReadToIndex, onOpenSettings, onAddNewChapter }) => {
   const [copySuccess, setCopySuccess] = useState(false);
   const [isChapterListOpen, setIsChapterListOpen] = useState(false);
   const [isSpeedSelectorOpen, setIsSpeedSelectorOpen] = useState(false);
@@ -407,12 +408,15 @@ export const ReaderPage: React.FC<{
             />
         )}
         <header className="flex items-center justify-between p-3 sm:p-4 border-b border-[var(--color-border-secondary)] flex-shrink-0 w-full max-w-5xl mx-auto">
-          <button onClick={onExit} className="flex items-center gap-2 p-2 rounded-lg hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label="Quay lại">
+          <button onClick={onBack} className="flex items-center gap-2 p-2 rounded-lg hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label="Quay lại">
             <ArrowLeftIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
-            <span className="hidden sm:inline text-md font-semibold text-[var(--color-text-secondary)]">DS Chương</span>
+            <span className="hidden sm:inline text-md font-semibold text-[var(--color-text-secondary)]">Quay lại</span>
           </button>
           <h2 className="text-lg sm:text-xl font-bold text-[var(--color-text-primary)] text-center truncate px-2" title={`${storyName} - Chương ${chapterNumber}`}>{`Chương ${chapterNumber}`}</h2>
           <div className="flex items-center gap-1 sm:gap-2">
+            <button onClick={() => onAddNewChapter(storyName)} className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label="Thêm chương mới">
+                <PlusIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
+            </button>
             <button onClick={handleToggleBookmark} className="p-2 rounded-full hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label={bookmark?.chapter === chapterNumber ? "Bỏ đánh dấu chương" : "Đánh dấu chương này"}>
                 {bookmark?.chapter === chapterNumber ? <BookmarkSolidIcon className="w-6 h-6 text-[var(--color-accent-primary)]" /> : <BookmarkIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />}
             </button>

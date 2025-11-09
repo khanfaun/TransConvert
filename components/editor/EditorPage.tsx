@@ -43,7 +43,7 @@ export const EditorPage: React.FC<EditorPageProps> = ({
             <header className="flex items-center justify-between w-full max-w-5xl mx-auto mb-6">
                 <button onClick={onBack} className="flex items-center gap-2 p-2 -ml-2 rounded-lg hover:bg-[var(--color-bg-active)] active:bg-[var(--color-bg-tertiary)] transition-colors" aria-label="Quay lại">
                     <ArrowLeftIcon className="w-6 h-6 text-[var(--color-text-secondary)]" />
-                    <span className="hidden sm:inline text-md font-semibold text-[var(--color-text-secondary)]">Danh sách chương</span>
+                    <span className="hidden sm:inline text-md font-semibold text-[var(--color-text-secondary)]">Quay lại</span>
                 </button>
                 <div className="text-center flex-grow mx-4">
                     <h1 className="text-2xl sm:text-3xl font-bold text-[var(--color-text-primary)]">Thêm chương mới</h1>

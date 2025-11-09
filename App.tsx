@@ -26,7 +26,9 @@ const App: React.FC = () => {
   
   const [settings, setSettings] = useState<AppSettings>(loadSettings);
   
-  const [currentView, setCurrentView] = useState<AppView>('library');
+  const [history, setHistory] = useState<AppView[]>(['library']);
+  const currentView = history[history.length - 1];
+
   const [selectedStory, setSelectedStory] = useState<string | null>(null);
   const [readerData, setReaderData] = useState<{ story: string; chapter: string } | null>(null);
   
@@ -89,9 +91,23 @@ const App: React.FC = () => {
   }, []);
 
   // ---- NAVIGATION HANDLERS ---- //
+  const navigateTo = (view: AppView) => {
+      setHistory(prev => [...prev, view]);
+  };
+  
+  const handleBack = () => {
+      setHistory(prev => (prev.length > 1 ? prev.slice(0, -1) : prev));
+  };
+  
+  const handleResetToLibrary = () => {
+      setSelectedStory(null);
+      setReaderData(null);
+      setHistory(['library']);
+  };
+
   const handleViewChapters = (storyName: string) => {
       setSelectedStory(storyName);
-      setCurrentView('chapterList');
+      navigateTo('chapterList');
   };
 
   const createNewPanel = (storyName: string, chapterNumber: string, tags: string): PanelState => ({
@@ -116,25 +132,14 @@ const App: React.FC = () => {
       
       setPanels([createNewPanel(storyName, nextChapterNumber, tags)]);
       setSelectedStory(storyName);
-      setCurrentView('editor');
+      navigateTo('editor');
   };
   
   const handleOpenReader = useCallback((story: string, chapter: string) => {
     setSelectedStory(story);
     setReaderData({ story, chapter });
-    setCurrentView('reader');
+    navigateTo('reader');
   }, []);
-  
-  const handleBackToLibrary = () => {
-      setSelectedStory(null);
-      setReaderData(null);
-      setCurrentView('library');
-  };
-  
-  const handleBackToChapterList = () => {
-    setCurrentView('chapterList');
-    setReaderData(null);
-  };
   
   // ---- DATA HANDLERS ---- //
   const handleSetBookmark = useCallback(async (storyName: string, chapter: string, scrollPosition: number) => {
@@ -369,8 +374,7 @@ const App: React.FC = () => {
         setToastMessage(`Đã ${processAction} ${totalPanels} chương thành công!`);
     }
 
-    // Reset editor state by navigating back to chapter list
-    handleBackToChapterList();
+    handleBack();
   };
 
 
@@ -381,13 +385,12 @@ const App: React.FC = () => {
         else if (renameModalData) setRenameModalData(null);
         else if (isSettingsModalOpen) setIsSettingsModalOpen(false);
         else if (isAddStoryModalOpen) setIsAddStoryModalOpen(false);
-        else if (currentView === 'reader') handleBackToChapterList();
-        else if (currentView === 'chapterList' || currentView === 'editor') handleBackToLibrary();
+        else handleBack();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isSettingsModalOpen, isAddStoryModalOpen, currentView, renameModalData, deleteModalData, handleBackToChapterList, handleBackToLibrary]);
+  }, [isSettingsModalOpen, isAddStoryModalOpen, renameModalData, deleteModalData, handleBack]);
 
   if (isLibraryLoading) {
     return (
@@ -422,21 +425,21 @@ const App: React.FC = () => {
                           storyName={selectedStory}
                           storyData={library[selectedStory]}
                           onOpenReader={handleOpenReader}
-                          onBack={handleBackToLibrary}
+                          onBack={handleBack}
                           onAddNewChapter={handleAddNewChapter}
                           onRenameChapter={(chapter) => setRenameModalData({type: 'chapter', oldName: chapter, storyName: selectedStory})}
                           onDeleteChapter={(chapter) => setDeleteModalData({type: 'chapter', storyName: selectedStory, chapterNumber: chapter})}
                       />
                   );
               }
-              handleBackToLibrary(); // Fallback if story is not found
+              handleResetToLibrary(); // Fallback if story is not found
               return null;
           case 'editor':
               if (selectedStory && library[selectedStory]) {
                   return (
                       <EditorPage
                           storyName={selectedStory}
-                          onBack={handleBackToChapterList}
+                          onBack={handleBack}
                           panels={panels}
                           onUpdatePanel={updatePanelState}
                           onAddPanel={addPanel}
@@ -450,7 +453,7 @@ const App: React.FC = () => {
                       />
                   );
               }
-              handleBackToLibrary(); // Fallback
+              handleResetToLibrary(); // Fallback
               return null;
           case 'reader':
               if (readerData) {
@@ -460,19 +463,20 @@ const App: React.FC = () => {
                           chapterNumber={readerData.chapter}
                           library={library}
                           onChapterChange={handleOpenReader}
-                          onExit={handleBackToChapterList}
+                          onBack={handleBack}
                           settings={settings}
                           onSetBookmark={handleSetBookmark}
                           onRemoveBookmark={handleRemoveBookmark}
                           onSetReadToIndex={handleSetReadToIndex}
                           onOpenSettings={() => setIsSettingsModalOpen(true)}
+                          onAddNewChapter={handleAddNewChapter}
                       />
                   );
               }
-              handleBackToChapterList(); // Fallback
+              handleBack(); // Fallback
               return null;
           default:
-              setCurrentView('library');
+              setHistory(['library']);
               return null;
       }
   }
